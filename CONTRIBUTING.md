@@ -22,11 +22,13 @@ The `orchestrator` primary agent runs this for each feature:
 5. **Implement** — `implementer` makes the tests pass and fills each box's
    `Explain` notes (What/Why/Rust concepts/Watch out).
 6. **Code review** — `reviewer` (code mode) reviews the diff; the owner reviews too.
-7. **ADR** — record a decision if one emerged.
-8. **Commit & PR** — commit in small steps with the `## Explain` block in each
+7. **QA** — `qa` audits process health, Rust learning value, and game quality
+   (advisory; escalate blocker/major findings to the owner).
+8. **ADR** — record a decision if one emerged.
+9. **Commit & PR** — commit in small steps with the `## Explain` block in each
    commit body (explanation commits are the norm); push the branch and open a
    pull request to `dev`. CI must pass.
-9. **Merge** — only after the owner validates. The agent never merges on its own.
+10. **Merge** — only after the owner validates. The agent never merges on its own.
 
 Small fixes are done directly by the `orchestrator`.
 

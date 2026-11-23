@@ -31,6 +31,8 @@ fresh context and cannot see this conversation.
 6. `reviewer` (code mode) — review the diff and the filled Explain notes for
    correctness, regressions, and idiomatic Rust. Pass it the base ref so it can
    inspect the diff with read-only git.
+7. `qa` — a final advisory pass on process health, Rust learning value, and game
+   quality (see its description). Escalate blocker/major findings to the owner.
 
 Then report to the user: what changed, where the spec and plan live, and any
 issues the reviewer flagged. If a stage's output is wrong or incomplete, send it
