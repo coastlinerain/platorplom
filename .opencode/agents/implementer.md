@@ -47,3 +47,22 @@ For each box in the plan's implementation checklist, fill its `Explain` fields:
 
 Run `cargo test` to confirm the tests pass. If a test or the plan looks wrong,
 stop and report rather than silently deviating from the plan.
+
+## Responsibility boundary (do NOT do these things)
+
+Your shell is deliberately scoped: you cannot delete/rename files (`rm`, `mv`),
+and you cannot run mutating git (`git add`/`commit`/`push`/`checkout`/`rm`) or
+arbitrary shell. When a task requires one of those, **do not attempt it — instead
+stop and report it explicitly** as a "handoff":
+
+- If a plan step requires **deleting or renaming files** (e.g. removing a module
+  that a refactor supersedes), list the exact paths to delete/rename and report
+  them at the end of your work (or immediately, if your remaining work depends on
+  it). The **orchestrator** performs destructive filesystem operations.
+- If a plan step requires **moving/adding files to git or committing**, report the
+  unchanged files and the commit message(s) you intend; the orchestrator commits.
+- Never use `rm`/`mv`/`git mv`/`git rm`; do not try to work around the permission.
+
+End every report with a short **"Handoff to orchestrator"** section that lists, as
+actionable items, anything that needs the orchestrator's permissions (file
+deletes/renames, git commits) plus any unresolved questions.
