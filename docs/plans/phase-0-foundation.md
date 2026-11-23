@@ -153,7 +153,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - What: `cargo build --workspace` compiles all three crates.
   - Why: Proves the workspace and `protocol` wiring compile.
   - Rust concepts: `cargo build`, workspace compilation.
-  - Watch out: Not run here (shell denied); orchestrator to verify.
+  - Watch out: Verified green by the orchestrator (`cargo build --workspace` exits 0).
 
 #### Box 7 — `cargo test --workspace` and `cargo clippy --workspace` succeed
 
@@ -165,7 +165,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - What: `cargo test --workspace` and `cargo clippy --workspace` both exit 0.
   - Why: Confirms tests pass (zero tests is fine) and clippy runs cleanly across members.
   - Rust concepts: `cargo test`, `cargo clippy`, `--workspace`.
-  - Watch out: Not run here (shell denied); `protocol` has no tests, which passes by definition.
+  - Watch out: Verified green by the orchestrator (`cargo test --workspace` and `cargo clippy --workspace` both exit 0).
 
 ### Area C — Wiring
 
@@ -202,17 +202,17 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 - [x] done
 - **Acceptance**: `client/src/network/client.rs` no longer declares `GamePacket`;
-  `client/src/network/client.rs`, `client/src/network/world.rs`, and
-  `client/src/world/lib.rs` import `protocol::GamePacket` and compile with no
+  the client files that use it (`client/src/network/world.rs`,
+  `client/src/world/lib.rs`) import `protocol::GamePacket` and compile with no
   other logic changes.
-- **Test**: `grep -n "protocol::GamePacket" client/src/network/client.rs
-  client/src/network/world.rs client/src/world/lib.rs` matches each; `cargo check
-  -p metroidvania-rust` succeeds.
+- **Test**: `grep -n "protocol::GamePacket" client/src/network/world.rs
+  client/src/world/lib.rs` matches each; `cargo check -p metroidvania-rust`
+  succeeds.
 - **Explain**
-  - What: Deleted the local `GamePacket` enum from `network/client.rs`, re-exported it as `pub use protocol::GamePacket;`, and switched `network/world.rs` + `world/lib.rs` to `use protocol::GamePacket;`.
-  - Why: Removes the duplicate client enum; `pub use` keeps `crate::network::client::GamePacket` valid while consumers import the canonical type directly.
-  - Rust concepts: re-exports (`pub use`), imports, module paths.
-  - Watch out: A plain `use` in `client.rs` would be flagged unused; `pub use` avoids that and satisfies the grep check.
+  - What: Deleted the local `GamePacket` enum from `network/client.rs`; `network/world.rs` and `world/lib.rs` now import `protocol::GamePacket` directly.
+  - Why: Removes the duplicate client enum. `network/client.rs` no longer references the type, so it needs no import (a `pub use` there would be an unused import under `-D warnings`).
+  - Rust concepts: imports, module paths.
+  - Watch out: `network/client.rs` has no `GamePacket` reference at all — it only defines the `NetworkClient` transport type.
 
 #### Box 11 — Exactly one `GamePacket` definition in the repo
 
@@ -237,7 +237,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - What: `cargo build -p metroidvania-server` and `-p metroidvania-rust` succeed.
   - Why: Confirms each crate compiles independently inside the workspace.
   - Rust concepts: `-p` package selection.
-  - Watch out: Not run here (shell denied).
+  - Watch out: Verified green by the orchestrator (both `-p` builds exit 0).
 
 ### Area D — Formatting & linting
 
@@ -263,7 +263,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - What: `cargo fmt --check --all` reports no diffs.
   - Why: Shared formatting gate.
   - Rust concepts: rustfmt.
-  - Watch out: Not run here (shell denied); I fixed the blank-line-after-derive in `client.rs`; run `cargo fmt --all` to normalize any remaining diffs.
+  - Watch out: Verified green by the orchestrator (`cargo fmt --check --all` exits 0 after `cargo fmt --all`).
 
 #### Box 15 — Workspace-level clippy lint config
 
@@ -288,7 +288,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - What: `cargo clippy --all-targets --workspace -- -D warnings` clean.
   - Why: Strict lint gate (warnings become errors).
   - Rust concepts: clippy, `-D warnings`.
-  - Watch out: Required fixes beyond `try_move` (unused imports, `redundant_field_names`, `spawn_entities` dead code); not run here (shell denied).
+  - Watch out: Verified green by the orchestrator; also required ~24 pre-existing clippy fixes (empty branches, collapsible ifs, casts, unused vars/imports, and the `world::world` → `world::game` rename).
 
 ### Area E — Commit template & hooks
 

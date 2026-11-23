@@ -202,9 +202,10 @@ Each item is a checkable statement of "done". Not an implementation plan.
    `protocol = { path = "../protocol" }`.
 10. `server/src/game_packet.rs` no longer exists; `server/src/main.rs` imports
     `protocol::GamePacket`.
-11. `client/src/network/client.rs` no longer declares `GamePacket`; all client
-    files that used it (`network/client.rs`, `network/world.rs`,
-    `world/lib.rs`) import `protocol::GamePacket` and compile.
+11. `client/src/network/client.rs` no longer declares `GamePacket`; the client
+    files that use it (`network/world.rs`, `world/lib.rs`) import
+    `protocol::GamePacket` and compile. (`network/client.rs` no longer
+    references the type at all.)
 12. Both `cargo build -p metroidvania-server` and
     `cargo build -p metroidvania-rust` succeed after the wiring.
 

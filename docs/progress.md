@@ -8,7 +8,7 @@ Working memory for the project. **Update this at the end of every task.**
 
 | Phase | Status |
 | --- | --- |
-| Phase 0 — Workflow foundation | in progress |
+| Phase 0 — Workflow foundation | done |
 | Phase 1 — Hardening | todo |
 | Phase 2 — Feature loop | todo |
 | Phase 3 — Continuous learning | ongoing |
@@ -33,21 +33,22 @@ Working memory for the project. **Update this at the end of every task.**
 
 ## Phase 1 checklist
 
-- [ ] Extract shared `protocol/` crate; fix protocol drift
+- [x] Extract shared `protocol/` crate; fix protocol drift (done in Phase 0)
 - [ ] Protocol round-trip tests (postcard)
 - [ ] Unit tests for `maps` parsing and `level` collision
-- [ ] Clean dead code / empty branches
+- [ ] Remove dead code (`try_move`, `spawn_entities` behind `#[allow(dead_code)]`)
 - [ ] Finalize ADR-001 networking model → netcode hardening
 
 ## Next actions (top = do first)
 
-1. Create Cargo workspace + `protocol/` crate.
-2. Move `GamePacket` into `protocol/` and fix field-type drift.
-3. Add protocol round-trip tests.
-4. Add `rustfmt.toml` + clippy lints.
-5. Add CI workflow.
+1. Add protocol round-trip tests (postcard).
+2. Unit tests for `maps` parsing and `level` collision.
+3. Remove dead code (`try_move`, `spawn_entities`).
+4. Finalize ADR-001 networking model → netcode hardening.
 
 ## Blockers / notes
 
-- Protocol is currently duplicated in `server/src/game_packet.rs` and
-  `client/src/network/client.rs` and has already drifted (see ADR-001).
+- (resolved) Protocol duplication/drift — fixed by the shared `protocol/` crate in Phase 0.
+- Phase 0 `clippy -D warnings` surfaced ~24 pre-existing lints, fixed in Phase 0
+  (empty branches, collapsible ifs, casts, unused imports/vars), plus the
+  `world::world` → `world::game` module rename.

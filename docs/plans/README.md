@@ -10,4 +10,4 @@ See [`template.md`](template.md).
 
 ## Index
 
-- (none yet — the first feature adds its plan here)
+- [phase-0-foundation.md](phase-0-foundation.md) — Workspace & protocol foundation
