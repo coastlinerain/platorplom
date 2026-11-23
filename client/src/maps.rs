@@ -175,3 +175,46 @@ impl Map {
         vec![row0, row1]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Map;
+    use crate::config::{MAP_HEIGHT, MAP_WIDTH};
+    use crate::types::{EntityType, TileType};
+
+    #[test]
+    fn map_new_shape() {
+        let map = Map::new();
+
+        assert_eq!(map.grids.len(), 2);
+        for row in &map.grids {
+            assert_eq!(row.len(), 2);
+            for grid in row {
+                assert_eq!(grid.len(), MAP_HEIGHT);
+                for inner_row in grid {
+                    assert_eq!(inner_row.len(), MAP_WIDTH);
+                }
+            }
+        }
+
+        assert_eq!(map.data.len(), 2);
+        for row in &map.data {
+            assert_eq!(row.len(), 2);
+            for grid in row {
+                assert_eq!(grid.len(), MAP_HEIGHT);
+                for inner_row in grid {
+                    assert_eq!(inner_row.len(), MAP_WIDTH);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn map_new_conversion_spot_checks() {
+        let map = Map::new();
+
+        assert_eq!(map.grids[0][0][0][0], TileType::Wall);
+        assert_eq!(map.grids[0][0][1][1], TileType::Empty);
+        assert_eq!(map.data[0][0][0][0], EntityType::Empty);
+    }
+}

@@ -81,7 +81,7 @@ the Explain block should already answer it.
 
 - `cargo test` must pass in every crate.
 - Protocol: round-trip serialize/deserialize tests.
-- Maps: parsing tests. Collision: `solid_in_rect`, `grounded`, `try_move` tests.
+- Maps: parsing tests. Collision: `solid_in_rect`, `grounded`, `colision` tests.
 
 ## Memory / pointer map
 

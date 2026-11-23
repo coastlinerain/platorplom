@@ -38,42 +38,6 @@ impl Level {
         self.colision(r.x, r.y, r.w, r.h)
     }
 
-    #[allow(dead_code)]
-    // TODO: wire up in Phase 1 collision cleanup
-    pub fn try_move(&self, rect: Rect, vel: Vec2) -> Vec2 {
-        let mut nueva_pos = rect.point();
-
-        // --- Resolución Eje X ---
-        let rect_x = Rect::new(nueva_pos.x + vel.x, nueva_pos.y, rect.w, rect.h);
-        if !self.solid_in_rect(rect_x) {
-            nueva_pos.x += vel.x;
-        } else {
-            // Ajuste fino: Pegar al borde del tile
-            if vel.x > 0.0 {
-                nueva_pos.x =
-                    ((nueva_pos.x + rect.w + vel.x) / TILE_SIZE).floor() * TILE_SIZE - rect.w;
-            } else if vel.x < 0.0 {
-                nueva_pos.x = ((nueva_pos.x + vel.x) / TILE_SIZE).floor() * TILE_SIZE + TILE_SIZE;
-            }
-        }
-
-        // --- Resolución Eje Y ---
-        let rect_y = Rect::new(nueva_pos.x, nueva_pos.y + vel.y, rect.w, rect.h);
-        if !self.solid_in_rect(rect_y) {
-            nueva_pos.y += vel.y;
-        } else {
-            if vel.y > 0.0 {
-                nueva_pos.y =
-                    ((nueva_pos.y + rect.h + vel.y) / TILE_SIZE).floor() * TILE_SIZE - rect.h;
-            } else if vel.y < 0.0 {
-                // Saltando
-                nueva_pos.y = ((nueva_pos.y + vel.y) / TILE_SIZE).floor() * TILE_SIZE + TILE_SIZE;
-            }
-        }
-
-        nueva_pos
-    }
-
     fn solid_point(&self, x: f32, y: f32) -> bool {
         let gx = (x / TILE_SIZE) as usize;
         let gy = (y / TILE_SIZE) as usize;
@@ -135,5 +99,99 @@ impl Level {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Level;
+    use crate::types::{EntityType, TileType};
+    use macroquad::prelude::Rect;
+
+    fn wall_ring_level() -> Level {
+        let grid = vec![
+            vec![TileType::Wall, TileType::Wall, TileType::Wall],
+            vec![TileType::Wall, TileType::Empty, TileType::Wall],
+            vec![TileType::Wall, TileType::Empty, TileType::Wall],
+            vec![TileType::Wall, TileType::Wall, TileType::Wall],
+        ];
+        Level::new(grid, vec![vec![EntityType::Empty; 3]; 4])
+    }
+
+    fn single_wall_cell_level() -> Level {
+        let grid = vec![
+            vec![TileType::Wall, TileType::Empty, TileType::Empty],
+            vec![TileType::Empty, TileType::Empty, TileType::Empty],
+            vec![TileType::Empty, TileType::Empty, TileType::Empty],
+        ];
+        Level::new(grid, vec![vec![EntityType::Empty; 3]; 3])
+    }
+
+    #[test]
+    fn solid_in_rect_overlaps_wall() {
+        let level = wall_ring_level();
+        assert!(level.solid_in_rect(Rect::new(0.0, 0.0, 40.0, 40.0)));
+    }
+
+    #[test]
+    fn solid_in_rect_empty_interior() {
+        let level = wall_ring_level();
+        assert!(!level.solid_in_rect(Rect::new(45.0, 80.0, 10.0, 10.0)));
+    }
+
+    #[test]
+    fn solid_in_rect_straddles_boundary() {
+        let level = wall_ring_level();
+        assert!(level.solid_in_rect(Rect::new(35.0, 85.0, 10.0, 10.0)));
+    }
+
+    #[test]
+    fn solid_in_rect_out_of_bounds_not_solid() {
+        let level = wall_ring_level();
+        assert!(!level.solid_in_rect(Rect::new(-100.0, -100.0, 50.0, 50.0)));
+    }
+
+    #[test]
+    fn grounded_within_one_px_above_floor() {
+        let level = wall_ring_level();
+        assert!(level.grounded(Rect::new(45.0, 79.0, 10.0, 40.0)));
+    }
+
+    #[test]
+    fn grounded_floating_above() {
+        let level = wall_ring_level();
+        assert!(!level.grounded(Rect::new(45.0, 40.0, 10.0, 40.0)));
+    }
+
+    #[test]
+    fn colision_empty_area() {
+        let level = wall_ring_level();
+        assert!(!level.colision(45.0, 80.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn colision_overlaps_wall() {
+        let level = wall_ring_level();
+        assert!(level.colision(0.0, 0.0, 40.0, 40.0));
+    }
+
+    // `colision` delegates to `solid_point`, which treats coordinates outside the
+    // grid as solid (its `else` branch returns true). This is the OPPOSITE of
+    // `solid_in_rect`, which treats out-of-bounds as not solid — an existing
+    // asymmetry, locked here rather than fixed.
+    #[test]
+    fn colision_out_of_bounds_is_solid() {
+        let level = wall_ring_level();
+        assert!(level.colision(200.0, 40.0, 10.0, 10.0));
+    }
+
+    // `colision` samples six points with a ±2.0 px horizontal inset, so a rect
+    // whose only wall overlap is a corner (2 px or less) is NOT detected. Here the
+    // single-wall fixture's top-left corner sits inside that inset, so all six
+    // sample points miss the wall.
+    #[test]
+    fn colision_ignores_two_px_corner_inset() {
+        let level = single_wall_cell_level();
+        assert!(!level.colision(38.0, 30.0, 42.0, 60.0));
     }
 }

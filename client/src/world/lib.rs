@@ -51,23 +51,32 @@ fn handle_death(world: &mut World) {
     world.player.pos = vec2(100.0, 100.0);
     load_current_level(world);
 }
+/// Iterate one room's `data` grid and build the enemies it declares.
+/// Pure: no `World`, no `NetworkClient`, no socket, no thread.
+pub(crate) fn enemies_from_data(data: &[Vec<EntityType>]) -> Vec<Enemy> {
+    let mut enemies = Vec::new();
+
+    for (y, row) in data.iter().enumerate() {
+        for (x, &cell) in row.iter().enumerate() {
+            let pos = vec2(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE);
+
+            match cell {
+                EntityType::EnemySpawn => enemies.push(Enemy::new(pos, BLUE)),
+                EntityType::PotionSpawn => enemies.push(Enemy::new(pos, GREEN)),
+                _ => {}
+            }
+        }
+    }
+
+    enemies
+}
+
 fn load_current_level(world: &mut World) {
     world.enemies.clear();
     world.player.bullets.clear();
 
     let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
-
-    for (y, row) in level.data.iter().enumerate() {
-        for (x, &data) in row.iter().enumerate() {
-            let pos = vec2(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE);
-
-            match data {
-                EntityType::EnemySpawn => world.enemies.push(Enemy::new(pos, BLUE)),
-                EntityType::PotionSpawn => world.enemies.push(Enemy::new(pos, GREEN)),
-                _ => {}
-            }
-        }
-    }
+    world.enemies = enemies_from_data(&level.data);
 
     println!(
         "Nivel {},{} cargado con {} enemigos",
@@ -121,5 +130,53 @@ pub fn check_level_transitions(world: &mut World) {
             world.current_coords.0, world.current_coords.1
         );
         load_current_level(world);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enemies_from_data;
+    use crate::config::TILE_SIZE;
+    use crate::types::EntityType;
+    use macroquad::prelude::vec2;
+
+    #[test]
+    fn enemies_from_data_spawns_enemy_and_potion() {
+        let data = vec![
+            vec![EntityType::EnemySpawn, EntityType::Empty],
+            vec![EntityType::BossSpawn, EntityType::PotionSpawn],
+        ];
+        let enemies = enemies_from_data(&data);
+
+        assert_eq!(enemies.len(), 2);
+        assert_eq!(enemies[0].pos, vec2(0.0, 0.0));
+        assert_eq!(enemies[1].pos, vec2(TILE_SIZE, TILE_SIZE));
+    }
+
+    #[test]
+    fn enemies_from_data_skips_boss_and_empty() {
+        let data = vec![vec![EntityType::BossSpawn, EntityType::Empty]];
+        assert_eq!(enemies_from_data(&data).len(), 0);
+
+        let data = vec![vec![EntityType::Empty, EntityType::Empty]];
+        assert_eq!(enemies_from_data(&data).len(), 0);
+    }
+
+    #[test]
+    fn enemies_from_data_count_matches_spawn_cells() {
+        let data = vec![
+            vec![
+                EntityType::EnemySpawn,
+                EntityType::PotionSpawn,
+                EntityType::Empty,
+            ],
+            vec![
+                EntityType::BossSpawn,
+                EntityType::EnemySpawn,
+                EntityType::PotionSpawn,
+            ],
+        ];
+        // 2 EnemySpawn + 2 PotionSpawn -> 4 enemies; BossSpawn and Empty are skipped.
+        assert_eq!(enemies_from_data(&data).len(), 4);
     }
 }

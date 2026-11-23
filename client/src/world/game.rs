@@ -1,5 +1,4 @@
 use crate::camera::GameCamera;
-use crate::config::TILE_SIZE;
 use crate::entities::bullet::Bullet;
 use crate::entities::enemy::Enemy;
 use crate::entities::nemesis::Nemesis;
@@ -7,13 +6,12 @@ use crate::entities::player::Player;
 use crate::level::Level;
 use crate::maps::Map;
 use crate::world::lib::{
-    check_level_transitions, check_player_death, update_enemy_bullets_position,
+    check_level_transitions, check_player_death, enemies_from_data, update_enemy_bullets_position,
 };
 
 use crate::network::client::NetworkClient;
 use crate::network::world::{send_join_req, update_network};
 use crate::traits::Entity;
-use crate::types::EntityType;
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
@@ -60,10 +58,15 @@ impl World {
             })
             .collect();
 
+        // Spawn the starting room (0, 0) once on construction. The borrow of
+        // `levels[0][0].data` must end before `levels` is moved into the struct
+        // literal below.
+        let enemies = enemies_from_data(&levels[0][0].data);
+
         Self {
             id: None,
             player: Player::new(0),
-            enemies: vec![],
+            enemies,
             levels_matrix: levels,
             current_coords: (0, 0),
             camera: GameCamera::new(),
@@ -99,22 +102,6 @@ impl World {
         }
         update_network(self);
         self.enemies.retain(|e| e.alive);
-    }
-
-    #[allow(dead_code)]
-    // TODO: wire up or remove in Phase 1 dead-code cleanup
-    pub fn spawn_entities(&mut self, level: &Level) {
-        for (y, row) in level.data.iter().enumerate() {
-            for (x, data) in row.iter().enumerate() {
-                let pos = vec2(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE);
-
-                match data {
-                    EntityType::EnemySpawn => self.enemies.push(Enemy::new(pos, BLUE)),
-                    EntityType::PotionSpawn => self.enemies.push(Enemy::new(pos, GREEN)),
-                    _ => {}
-                }
-            }
-        }
     }
 
     pub fn draw(&self) {
