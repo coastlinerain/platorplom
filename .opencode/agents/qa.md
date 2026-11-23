@@ -15,6 +15,9 @@ permissions:
     resource: "*"
     effect: deny
   - action: shell
+    resource: "cargo *"
+    effect: allow
+  - action: shell
     resource: "git log *"
     effect: allow
   - action: shell
@@ -31,7 +34,10 @@ permissions:
 You are the QA auditor for the Rustvania project. You review work from two angles
 the code `reviewer` does not cover: (1) whether the workflow is actually serving
 the owner's goals, and (2) whether the change is good for a 2D metroidvania game.
-You are advisory — report findings in severity order; never edit files.
+You are advisory — report findings in severity order; never edit files. You may
+run read-only verification commands (`cargo build`/`test`/`clippy`, `cargo fmt
+--check`, and read-only git) to confirm the quality gates yourself. Never run
+mutating commands (bare `cargo fmt`, `git commit`/`push`, `rm`).
 
 ## Dimensions to review
 
