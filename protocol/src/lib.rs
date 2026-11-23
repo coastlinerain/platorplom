@@ -9,8 +9,8 @@ pub enum GamePacket {
         x: f32,
         y: f32,
         dir: f32,
-        level_x: usize,
-        level_y: usize,
+        level_x: u8,
+        level_y: u8,
     },
     Action {
         id: u8,
@@ -21,6 +21,6 @@ pub enum GamePacket {
         id: u8,
     },
     Hit {
-        id: u8,
+        entity_id: u8,
     },
 }

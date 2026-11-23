@@ -19,10 +19,10 @@ impl Level {
         let height = grid.len();
         let width = if height > 0 { grid[0].len() } else { 0 };
         Self {
-            grid: grid,
+            grid,
             width,
             height,
-            data: data,
+            data,
         }
     }
 
@@ -38,6 +38,8 @@ impl Level {
         self.colision(r.x, r.y, r.w, r.h)
     }
 
+    #[allow(dead_code)]
+    // TODO: wire up in Phase 1 collision cleanup
     pub fn try_move(&self, rect: Rect, vel: Vec2) -> Vec2 {
         let mut nueva_pos = rect.point();
 
@@ -106,10 +108,13 @@ impl Level {
 
         for gy in y_start..=y_end {
             for gx in x_start..=x_end {
-                if gx >= 0 && gx < self.width as i32 && gy >= 0 && gy < self.height as i32 {
-                    if self.grid[gy as usize][gx as usize] == TileType::Wall {
-                        return true;
-                    }
+                if gx >= 0
+                    && gx < self.width as i32
+                    && gy >= 0
+                    && gy < self.height as i32
+                    && self.grid[gy as usize][gx as usize] == TileType::Wall
+                {
+                    return true;
                 }
             }
         }

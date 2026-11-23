@@ -1,8 +1,7 @@
 use crossbeam_channel::Sender;
-use laminar::{Config, Packet, Socket, SocketEvent};
-use std::{collections::HashMap, net::SocketAddr, time::Instant};
-mod game_packet;
-use game_packet::GamePacket;
+use laminar::{Packet, Socket, SocketEvent};
+use protocol::GamePacket;
+use std::{collections::HashMap, net::SocketAddr};
 
 fn main() {
     let mut socket = Socket::bind("127.0.0.1:12345").unwrap();
@@ -46,7 +45,7 @@ fn main() {
                                 level_x,
                                 level_y,
                             } => {
-                                for (&player_addr, &player_id) in players.iter() {
+                                for &player_addr in players.keys() {
                                     if player_addr != addr {
                                         let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
                                             id,
@@ -93,15 +92,16 @@ fn main() {
 
                                 broadcast_leave(&players, &packet_sender, id);
                             }
-                            GamePacket::Hit { id } => {
+                            GamePacket::Hit { entity_id: id } => {
                                 println!("Jugador {} ha muerto", id);
 
                                 // Retransmitimos a todos para que actualicen sus listas
                                 for (&player_addr, &player_id) in players.iter() {
                                     if player_id != id {
-                                        let bytes =
-                                            postcard::to_allocvec(&GamePacket::Hit { id: (id) })
-                                                .unwrap();
+                                        let bytes = postcard::to_allocvec(&GamePacket::Hit {
+                                            entity_id: id,
+                                        })
+                                        .unwrap();
                                         packet_sender
                                             .send(Packet::reliable_ordered(
                                                 player_addr,

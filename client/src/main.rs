@@ -10,7 +10,7 @@ mod world;
 
 use crate::maps::Map;
 use macroquad::prelude::*;
-use world::world::World;
+use world::game::World;
 
 #[macroquad::main("Rustvania")]
 async fn main() {

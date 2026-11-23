@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# commit-msg hook: reject commits whose first line is not Conventional Commits.
+
+commit_msg_file="$1"
+
+# The subject is the first non-empty, non-comment line.
+subject="$(grep -v '^#' "$commit_msg_file" | grep -v '^[[:space:]]*$' | head -n 1)"
+
+if ! printf '%s\n' "$subject" | grep -Eq '^(feat|fix|refactor|test|docs|chore)(\([^)]*\))?: .+'; then
+    echo "error: commit message must start with a Conventional Commits type" >&2
+    echo "error: expected '<type>(<scope>): <subject>', type one of:" >&2
+    echo "error:   feat | fix | refactor | test | docs | chore" >&2
+    echo "error: got: $subject" >&2
+    exit 1
+fi
+
+exit 0

@@ -60,7 +60,7 @@ impl Entity for Enemy {
 impl Enemy {
     pub fn new(pos: Vec2, color: Color) -> Self {
         Self {
-            pos: pos,
+            pos,
             vel: vec2(0.0, 0.0),
             w: 30.0,
             h: 38.0,
@@ -68,7 +68,7 @@ impl Enemy {
             state: EnemyState::Idle,
             timer: 0.0,
             alive: true,
-            color: color,
+            color,
         }
     }
     pub fn die(&mut self) {

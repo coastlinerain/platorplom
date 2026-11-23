@@ -45,12 +45,12 @@ impl Entity for Player {
         if is_key_pressed(KeyCode::Z) {
             self.bullets.push(Bullet::new(
                 self.pos + vec2(self.w / 2.0, self.h / 2.0),
-                self.dir as f32,
+                self.dir,
                 self.id,
             ));
         }
         // update bullets
-        self.bullets.iter_mut().for_each(|b| b.update(dt, &nivel));
+        self.bullets.iter_mut().for_each(|b| b.update(dt, nivel));
 
         self.vel.y += GRAVEDAD * dt;
 
@@ -63,10 +63,8 @@ impl Entity for Player {
         // Eje Y
         self.pos.y += self.vel.y;
         if nivel.colision(self.pos.x, self.pos.y, self.w, self.h) {
-            if self.vel.y > 0.0 {}
             self.pos.y -= self.vel.y;
             self.vel.y = 0.0;
-        } else {
         }
 
         self.grounded = nivel.grounded(self.get_rect());

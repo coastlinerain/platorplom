@@ -26,10 +26,10 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] `docs/plans/` index + template
 - [x] `orchestrator` (default primary) + `spec-designer`/`planner`/`implementer`/`tester`/`reviewer`/`explainer` subagents
 - [x] `opencode.json` (default agent + auto-load `CONTRIBUTING.md` + `docs/progress.md`)
-- [ ] Cargo workspace + shared `protocol/` crate
-- [ ] `rustfmt.toml` + clippy lints
-- [ ] Conventional commit template + pre-commit hooks
-- [ ] GitHub Actions CI (fmt, clippy, test)
+- [x] Cargo workspace + shared `protocol/` crate
+- [x] `rustfmt.toml` + clippy lints
+- [x] Conventional commit template + pre-commit hooks
+- [x] GitHub Actions CI (fmt, clippy, test)
 
 ## Phase 1 checklist
 

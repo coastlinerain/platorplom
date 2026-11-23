@@ -36,7 +36,7 @@ impl Nemesis {
 
         // Dibujar el ID sobre la cabeza del jugador
         draw_text(
-            &format!("P: {}", self.id),
+            format!("P: {}", self.id),
             self.pos.x,
             self.pos.y - 10.0,
             15.0,

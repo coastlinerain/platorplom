@@ -43,7 +43,11 @@ a later phase).
 - **Protocol round-trip serialize/deserialize tests** (postcard) — later phase.
 - **Maps parsing tests** and **collision unit tests** (`solid_in_rect`,
   `grounded`, `try_move`) — later phase.
-- **Dead-code / empty-branch cleanup** — later phase.
+- **Dead-code / empty-branch cleanup** — *revised during implementation*: the
+  clippy cleanup required by acceptance #16 (empty branches, collapsible `if`s,
+  unnecessary casts, unused imports/vars) was pulled forward into Phase 0.
+  Dead-code *removal* (unused functions `try_move`, `spawn_entities`, kept
+  behind `#[allow(dead_code)]`) remains a later phase.
 - **Netcode hardening** (fixed tick rate, reliable-vs-unreliable channel
   choices, interpolation, server-authoritative simulation, lag compensation) —
   ADR-001 decisions 2–3; later phase.

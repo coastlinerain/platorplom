@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# pre-commit hook: run formatting, linting, and tests before allowing a commit.
+
+set -e
+
+cargo fmt --check
+cargo clippy
+cargo test

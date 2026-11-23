@@ -50,11 +50,11 @@ impl World {
         let levels: Vec<Vec<Level>> = matrix_data
             .grids
             .into_iter()
-            .zip(matrix_data.data.into_iter())
+            .zip(matrix_data.data)
             .map(|(grid_row, data_row)| {
                 grid_row
                     .into_iter()
-                    .zip(data_row.into_iter())
+                    .zip(data_row)
                     .map(|(grid, data)| Level::new(grid, data))
                     .collect()
             })
@@ -67,7 +67,7 @@ impl World {
             levels_matrix: levels,
             current_coords: (0, 0),
             camera: GameCamera::new(),
-            network: network,
+            network,
             other_players: HashMap::new(),
             enemy_bullets: Vec::new(),
         }
@@ -79,10 +79,10 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
-            self.player.update(dt, &level);
+            self.player.update(dt, level);
 
             for enemy in &mut self.enemies {
-                enemy.update(dt, &level);
+                enemy.update(dt, level);
             }
 
             for bullet in &mut self.player.bullets {
@@ -95,12 +95,14 @@ impl World {
                 }
             }
             self.camera
-                .update(self.player.pos, vec2(self.player.w, self.player.h), &level);
+                .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
         update_network(self);
         self.enemies.retain(|e| e.alive);
     }
 
+    #[allow(dead_code)]
+    // TODO: wire up or remove in Phase 1 dead-code cleanup
     pub fn spawn_entities(&mut self, level: &Level) {
         for (y, row) in level.data.iter().enumerate() {
             for (x, data) in row.iter().enumerate() {
@@ -122,7 +124,7 @@ impl World {
         level.draw();
 
         // --- RENDERIZAR OTROS JUGADORES ---
-        for (id, enemy) in &self.other_players {
+        for enemy in self.other_players.values() {
             if enemy.coords == self.current_coords {
                 enemy.draw();
             }
@@ -146,7 +148,7 @@ impl World {
 
         // --- HUD (Coordenadas de pantalla fija) ---
         draw_text(
-            &format!("Level: {},{}", self.current_coords.0, self.current_coords.1),
+            format!("Level: {},{}", self.current_coords.0, self.current_coords.1),
             10.0,
             20.0,
             20.0,
@@ -154,7 +156,7 @@ impl World {
         );
 
         if let Some(my_id) = self.id {
-            draw_text(&format!("My ID: {}", my_id), 10.0, 40.0, 20.0, GREEN);
+            draw_text(format!("My ID: {}", my_id), 10.0, 40.0, 20.0, GREEN);
         } else {
             draw_text("Connecting...", 10.0, 40.0, 20.0, RED);
         }

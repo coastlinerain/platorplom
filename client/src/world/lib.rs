@@ -1,17 +1,17 @@
 use crate::config::TILE_SIZE;
 use crate::entities::enemy::Enemy;
-use crate::network::client::GamePacket;
 use crate::traits::Entity;
 use crate::types::EntityType;
-use crate::world::world::World;
+use crate::world::game::World;
 use macroquad::prelude::*;
+use protocol::GamePacket;
 
 pub fn update_enemy_bullets_position(world: &mut World, dt: f32) {
     let current_room = world.current_coords;
     let level = &world.levels_matrix[current_room.1][current_room.0];
 
     world.enemy_bullets.retain_mut(|bullet| {
-        if let Some(owner) = world.other_players.get(&bullet.owner_id) {
+        if world.other_players.contains_key(&bullet.owner_id) {
             bullet.update(dt, level);
             bullet.active
         } else {
@@ -94,12 +94,10 @@ pub fn check_level_transitions(world: &mut World) {
         }
     }
     // --- SALIDA IZQUIERDA ---
-    else if p.pos.x < -5.0 {
-        if cx > 0 {
-            world.current_coords.0 -= 1;
-            p.pos.x = world.levels_matrix[cy][cx - 1].pixel_width() - p.w - 10.0;
-            changed = true;
-        }
+    else if p.pos.x < -5.0 && cx > 0 {
+        world.current_coords.0 -= 1;
+        p.pos.x = world.levels_matrix[cy][cx - 1].pixel_width() - p.w - 10.0;
+        changed = true;
     }
 
     // --- SALIDA ABAJO ---
@@ -111,12 +109,10 @@ pub fn check_level_transitions(world: &mut World) {
         }
     }
     // --- SALIDA ARRIBA ---
-    else if p.pos.y + p.h < 5.0 {
-        if cy > 0 {
-            world.current_coords.1 -= 1;
-            p.pos.y = world.levels_matrix[cy - 1][cx].pixel_height() - p.h - 10.0;
-            changed = true;
-        }
+    else if p.pos.y + p.h < 5.0 && cy > 0 {
+        world.current_coords.1 -= 1;
+        p.pos.y = world.levels_matrix[cy - 1][cx].pixel_height() - p.h - 10.0;
+        changed = true;
     }
 
     if changed {

@@ -1,17 +1,18 @@
 use crate::entities::bullet::Bullet;
 use crate::entities::nemesis::Nemesis;
-use crate::network::client::{GamePacket, NetworkClient};
-use crate::world::world::World;
+use crate::network::client::NetworkClient;
+use crate::world::game::World;
 use laminar::SocketEvent;
 use macroquad::prelude::*;
+use protocol::GamePacket;
 
 pub fn update_network(world: &mut World) {
     // 1. RECIBIR: Escuchar qué dice el servidor
     while let Ok(event) = world.network.receiver.try_recv() {
-        if let SocketEvent::Packet(packet) = event {
-            if let Ok(decoded) = postcard::from_bytes::<GamePacket>(packet.payload()) {
-                handle_packet(world, decoded);
-            }
+        if let SocketEvent::Packet(packet) = event
+            && let Ok(decoded) = postcard::from_bytes::<GamePacket>(packet.payload())
+        {
+            handle_packet(world, decoded);
         }
     }
 
@@ -39,7 +40,7 @@ pub fn update_network(world: &mut World) {
             let shoot_msg = GamePacket::Action {
                 id: world.id.unwrap(),
                 kind: "shoot".to_string(),
-                dir: world.player.dir as f32,
+                dir: world.player.dir,
             };
             let bytes = postcard::to_allocvec(&shoot_msg).unwrap();
             world
@@ -85,23 +86,21 @@ fn handle_packet(world: &mut World, decoded: GamePacket) {
             }
         }
         GamePacket::Action { id, kind, dir } => {
-            if kind.to_string() == "shoot" {
+            if kind == "shoot" {
                 if let Some(enemy) = world.other_players.get(&id) {
                     println!("El jugador {} disparó en {:?}", id, enemy.pos);
 
                     let spawn_center =
                         vec2(enemy.pos.x + (enemy.w / 2.0), enemy.pos.y + (enemy.h / 2.0));
 
-                    if let Some(owner) = world.other_players.get(&id) {
-                        if owner.coords == world.current_coords {
-                            println!("SAME room");
+                    if let Some(owner) = world.other_players.get(&id)
+                        && owner.coords == world.current_coords
+                    {
+                        println!("SAME room");
 
-                            world.enemy_bullets.push(Bullet::new(
-                                spawn_center,
-                                dir as f32,
-                                enemy.id,
-                            ));
-                        }
+                        world
+                            .enemy_bullets
+                            .push(Bullet::new(spawn_center, dir, enemy.id));
                     }
                 } else {
                     println!(
