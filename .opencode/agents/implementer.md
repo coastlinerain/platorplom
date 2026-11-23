@@ -15,16 +15,19 @@ permissions:
     resource: "*"
     effect: deny
   - action: shell
-    resource: "cargo build *"
+    resource: "cargo *"
     effect: allow
   - action: shell
-    resource: "cargo test *"
+    resource: "git status *"
     effect: allow
   - action: shell
-    resource: "cargo fmt *"
+    resource: "git log *"
     effect: allow
   - action: shell
-    resource: "cargo clippy *"
+    resource: "git diff *"
+    effect: allow
+  - action: shell
+    resource: "git show *"
     effect: allow
 ---
 
