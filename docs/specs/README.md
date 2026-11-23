@@ -8,4 +8,4 @@ See [`template.md`](template.md).
 
 ## Index
 
-- (none yet — add your first feature here)
+- [phase-0-foundation.md](phase-0-foundation.md) — Workspace & protocol foundation
