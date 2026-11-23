@@ -175,12 +175,20 @@ mod tests {
         assert!(level.colision(0.0, 0.0, 40.0, 40.0));
     }
 
+    // `colision` delegates to `solid_point`, which treats coordinates outside the
+    // grid as solid (its `else` branch returns true). This is the OPPOSITE of
+    // `solid_in_rect`, which treats out-of-bounds as not solid — an existing
+    // asymmetry, locked here rather than fixed.
     #[test]
     fn colision_out_of_bounds_is_solid() {
         let level = wall_ring_level();
         assert!(level.colision(200.0, 40.0, 10.0, 10.0));
     }
 
+    // `colision` samples six points with a ±2.0 px horizontal inset, so a rect
+    // whose only wall overlap is a corner (2 px or less) is NOT detected. Here the
+    // single-wall fixture's top-left corner sits inside that inset, so all six
+    // sample points miss the wall.
     #[test]
     fn colision_ignores_two_px_corner_inset() {
         let level = single_wall_cell_level();

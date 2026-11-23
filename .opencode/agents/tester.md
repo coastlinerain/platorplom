@@ -30,5 +30,5 @@ You may ONLY add or modify test code:
 Never change production logic. If a test reveals a bug or an untestable design,
 report it clearly instead of fixing the source. Focus on pure logic: protocol
 round-trips (postcard), map parsing, and collision
-(`solid_in_rect`, `grounded`, `try_move`). After writing tests, run
+(`solid_in_rect`, `grounded`, `colision`). After writing tests, run
 `cargo test` and confirm they pass; report any failures with the failing output.

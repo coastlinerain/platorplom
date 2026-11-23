@@ -1,6 +1,6 @@
 # Phase 1 — Tests and dead-code cleanup — Implementation Plan
 
-- Status: draft
+- Status: done
 - Spec: `docs/specs/phase-1-tests-cleanup.md`
 - Date: 2026-11-23
 
@@ -523,7 +523,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 #### Box 17 — `cargo fmt` clean
 
-- [ ] done
+- [x] done
 - **Acceptance**: `cargo fmt --check --all` reports no diffs.
 - **Test**: `cargo fmt --check --all`.
 - **Explain**
@@ -531,12 +531,11 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     reflow, 4-space indent, single blank line between items).
   - Why: Keeps the tree `fmt`-clean so CI passes.
   - Rust concepts: formatting only (no semantic change).
-  - Watch out: **Not verified** — the `shell` tool is permission-denied in this
-    subagent, so `cargo fmt --check --all` could not be run here.
+  - Watch out: Verified green by the orchestrator (`cargo fmt --check --all` exits 0).
 
 #### Box 18 — `cargo clippy` clean
 
-- [ ] done
+- [x] done
 - **Acceptance**: `cargo clippy --all-targets --workspace -- -D warnings` exits 0.
 - **Test**: `cargo clippy --all-targets --workspace -- -D warnings`.
 - **Explain**
@@ -545,12 +544,11 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   - Why: The phase's quality gate runs clippy with warnings denied; dead imports
     left behind by `spawn_entities` removal would fail it.
   - Rust concepts: unused-import lint; `#[allow(dead_code)]` removal.
-  - Watch out: **Not verified** — the `shell` tool is permission-denied in this
-    subagent, so `cargo clippy … -D warnings` could not be run here.
+  - Watch out: Verified green by the orchestrator (`cargo clippy --all-targets --workspace -- -D warnings` exits 0).
 
 #### Box 19 — `cargo test --workspace` green
 
-- [ ] done
+- [x] done
 - **Acceptance**: `cargo test --workspace` passes (all new tests green; no
   rendering/window code exercised — collision tests build `Rect`/`Vec2` only and
   never call `Level::draw` or a macroquad drawing function).
@@ -563,8 +561,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     behave as intended.
   - Rust concepts: workspace test invocation; integration + inline `#[cfg(test)]`
     test targets.
-  - Watch out: **Not verified** — the `shell` tool is permission-denied in this
-    subagent, so `cargo test --workspace` could not be run here.
+  - Watch out: Verified green by the orchestrator (`cargo test --workspace` passes: 23 tests).
 
 ## Open questions
 

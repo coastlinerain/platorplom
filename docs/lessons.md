@@ -25,3 +25,19 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **`Option<u8>`** for a "not yet assigned" player id.
 - **`std::thread::spawn`** for the network polling loop.
 - **macroquad prelude** — `Vec2`, `Rect`, `draw_rectangle`, `is_key_down`, etc.
+
+## Phase 1 (2026-11-23)
+
+- **`PartialEq` vs `Eq`** — `GamePacket` derives `PartialEq` but not `Eq`, because
+  `f32` implements `PartialEq` (NaN != NaN) but not `Eq`. `assert_eq!` needs
+  `PartialEq`; `Eq` requires total equality.
+- **`#[cfg(test)] mod tests` vs `tests/` integration tests** — inline `#[cfg(test)]`
+  unit tests can reach private items; `tests/` integration tests use only the
+  public library API. A binary crate (no `lib.rs`) can only use inline tests.
+- **`[dev-dependencies]` + feature flags** — `postcard` (with the `alloc` feature)
+  is a dev-dependency of `protocol`, so the normal build stays lean (only `serde`).
+- **`pub(crate)` visibility** — lets a sibling module (`world::game`) call a
+  function in `world::lib` without exposing it publicly.
+- **borrow-before-move** — in `World::new`, compute `enemies_from_data(&levels[0][0].data)`
+  into an owned `Vec<Enemy>` BEFORE moving `levels` into the struct literal, so the
+  borrow ends before the move.

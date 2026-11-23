@@ -1,6 +1,6 @@
 # Phase 1 — Tests and dead-code cleanup
 
-- Status: draft
+- Status: accepted
 - Date: 2026-11-23
 - Branch: `test/phase-1-tests-cleanup`
 

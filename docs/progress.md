@@ -9,7 +9,7 @@ Working memory for the project. **Update this at the end of every task.**
 | Phase | Status |
 | --- | --- |
 | Phase 0 — Workflow foundation | done |
-| Phase 1 — Hardening | todo |
+| Phase 1 — Hardening | done |
 | Phase 2 — Feature loop | todo |
 | Phase 3 — Continuous learning | ongoing |
 
@@ -34,17 +34,16 @@ Working memory for the project. **Update this at the end of every task.**
 ## Phase 1 checklist
 
 - [x] Extract shared `protocol/` crate; fix protocol drift (done in Phase 0)
-- [ ] Protocol round-trip tests (postcard)
-- [ ] Unit tests for `maps` parsing and `level` collision
-- [ ] Remove dead code (`try_move`, `spawn_entities` behind `#[allow(dead_code)]`)
+- [x] Protocol round-trip tests (postcard)
+- [x] Unit tests for `maps` parsing and `level` collision
+- [x] Remove dead code (`try_move`, `spawn_entities`)
 - [ ] Finalize ADR-001 networking model → netcode hardening
 
 ## Next actions (top = do first)
 
-1. Add protocol round-trip tests (postcard).
-2. Unit tests for `maps` parsing and `level` collision.
-3. Remove dead code (`try_move`, `spawn_entities`).
-4. Finalize ADR-001 networking model → netcode hardening.
+1. Finalize ADR-001 networking model → netcode hardening (Phase 2).
+2. Consider client lib/bin split to enable `client/tests/` integration tests.
+3. Consider extracting a `core` library crate for pure game logic.
 
 ## Blockers / notes
 
@@ -52,3 +51,6 @@ Working memory for the project. **Update this at the end of every task.**
 - Phase 0 `clippy -D warnings` surfaced ~24 pre-existing lints, fixed in Phase 0
   (empty branches, collapsible ifs, casts, unused imports/vars), plus the
   `world::world` → `world::game` module rename.
+- Phase 1 QA flagged: `PotionSpawn` currently spawns a green `Enemy` (no `Potion`
+  type yet) — latent, but now locked by test; client is a binary crate so tests
+  are inline `#[cfg(test)]` (a lib/bin split would enable `client/tests/`).
