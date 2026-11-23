@@ -21,10 +21,16 @@ fresh context and cannot see this conversation.
 1. `spec-designer` — write `docs/specs/<feature>.md`.
 2. `planner` — read the spec, write `docs/plans/<feature>.md` (checkable boxes,
    public API signatures, test cases).
-3. `tester` — read the plan, write failing tests for its test cases.
-4. `implementer` — read the plan, implement to pass the tests, fill each box's
+3. `reviewer` (plan mode) — verify the plan is complete, correct, and feasible
+   against the spec and the codebase. If it finds real issues, send the plan
+   back to `planner` with concrete feedback.
+4. `tester` — read the plan, write failing tests for its test cases (skip if the
+   plan states there are no tests this phase).
+5. `implementer` — read the plan, implement to pass the tests, fill each box's
    Explain notes.
-5. `reviewer` — review the diff for correctness and regressions.
+6. `reviewer` (code mode) — review the diff and the filled Explain notes for
+   correctness, regressions, and idiomatic Rust. Pass it the base ref so it can
+   inspect the diff with read-only git.
 
 Then report to the user: what changed, where the spec and plan live, and any
 issues the reviewer flagged. If a stage's output is wrong or incomplete, send it

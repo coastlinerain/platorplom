@@ -15,16 +15,16 @@ permissions:
     resource: "*"
     effect: deny
   - action: shell
-    resource: "cargo build*"
+    resource: "cargo build *"
     effect: allow
   - action: shell
-    resource: "cargo test*"
+    resource: "cargo test *"
     effect: allow
   - action: shell
-    resource: "cargo fmt*"
+    resource: "cargo fmt *"
     effect: allow
   - action: shell
-    resource: "cargo clippy*"
+    resource: "cargo clippy *"
     effect: allow
 ---
 

@@ -15,7 +15,7 @@ permissions:
     resource: "*"
     effect: deny
   - action: shell
-    resource: "cargo test*"
+    resource: "cargo test *"
     effect: allow
 ---
 

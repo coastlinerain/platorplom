@@ -22,9 +22,11 @@ finish before the next:
 1. `spec-designer` → writes `docs/specs/<feature>.md`
 2. `planner` → writes `docs/plans/<feature>.md` (checkable boxes, public API
    signatures, test cases)
-3. `tester` → writes the failing tests from the plan's test cases
-4. `implementer` → implements to pass the tests, fills each box's Explain notes
-5. `reviewer` → reviews the diff for correctness and regressions
+3. `reviewer` (plan mode) → verifies the plan is complete and feasible; send it
+   back to `planner` if not
+4. `tester` → writes the failing tests from the plan's test cases
+5. `implementer` → implements to pass the tests, fills each box's Explain notes
+6. `reviewer` (code mode) → reviews the diff for correctness and regressions
 
 Small fixes are done directly by the `orchestrator`.
 
@@ -95,5 +97,6 @@ the Explain block should already answer it.
 - `planner` — turns a spec into a checkable implementation plan.
 - `tester` — writes and runs tests for pure logic.
 - `implementer` — implements a plan, filling per-box Explain notes.
-- `reviewer` — reviews changes for correctness/regressions (read-only).
+- `reviewer` — reviews plans (completeness/feasibility) and code
+  (correctness/regressions); read-only + read-only git.
 - `explainer` — explains code/decisions without editing (learning aid).
