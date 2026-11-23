@@ -9,3 +9,4 @@ See [`template.md`](template.md).
 ## Index
 
 - [phase-0-foundation.md](phase-0-foundation.md) — Workspace & protocol foundation
+- [phase-1-tests-cleanup.md](phase-1-tests-cleanup.md) — Tests and dead-code cleanup
