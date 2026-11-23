@@ -15,6 +15,9 @@ permissions:
     resource: "*"
     effect: deny
   - action: shell
+    resource: "cargo *"
+    effect: allow
+  - action: shell
     resource: "git diff *"
     effect: allow
   - action: shell
@@ -47,6 +50,7 @@ spec. Flag: correctness bugs, protocol drift between server/client, `unwrap`/
 panic risks, non-idiomatic Rust, missing tests for pure logic, and anything that
 contradicts `AGENTS.md` conventions.
 
-You may run read-only git commands only (`git diff`/`status`/`log`/`show`).
-Never run mutating commands (`git commit`, `git push`, `git add`, `git checkout`,
-`git rm`) or any non-git shell command.
+You may run read-only verification commands (`cargo build`/`test`/`clippy`,
+`cargo fmt --check`, and read-only git: `diff`/`status`/`log`/`show`). Never run
+mutating commands (`git commit`/`push`/`add`/`checkout`/`rm`, bare `cargo fmt`,
+or other non-verification shell).
