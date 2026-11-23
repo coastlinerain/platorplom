@@ -27,6 +27,7 @@ finish before the next:
 4. `tester` → writes the failing tests from the plan's test cases
 5. `implementer` → implements to pass the tests, fills each box's Explain notes
 6. `reviewer` (code mode) → reviews the diff for correctness and regressions
+7. `qa` → final advisory pass on process health, Rust learning value, and game quality
 
 Small fixes are done directly by the `orchestrator`.
 
@@ -99,4 +100,6 @@ the Explain block should already answer it.
 - `implementer` — implements a plan, filling per-box Explain notes.
 - `reviewer` — reviews plans (completeness/feasibility) and code
   (correctness/regressions); read-only + read-only git.
+- `qa` — audits process health, Rust learning value, and game quality
+  (advisory, read-only).
 - `explainer` — explains code/decisions without editing (learning aid).
