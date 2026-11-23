@@ -1,14 +1,10 @@
 mod camera;
-mod config;
-mod entities;
-mod level;
-mod maps;
+mod hud;
 mod network;
-mod traits;
-mod types;
+mod render;
 mod world;
 
-use crate::maps::Map;
+use game::maps::Map;
 use macroquad::prelude::*;
 use world::game::World;
 

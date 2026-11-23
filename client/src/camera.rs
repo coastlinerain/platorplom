@@ -1,4 +1,4 @@
-use crate::level::Level;
+use game::level::Level;
 use macroquad::prelude::*;
 use std::fmt;
 
