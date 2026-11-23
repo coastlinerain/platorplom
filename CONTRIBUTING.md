@@ -6,7 +6,8 @@ Full-ceremony process for AI-assisted development of Rustvania.
 
 - `main` — stable.
 - `dev` — integration.
-- Feature work on short-lived branches.
+- Feature work on short-lived branches: **one branch per spec**, named
+  `<type>/<spec-slug>` (e.g. `refactor/phase-0-foundation`), branched from `dev`.
 
 ## Feature loop (pipeline)
 
@@ -20,7 +21,10 @@ The `orchestrator` primary agent runs this for each feature:
    `Explain` notes (What/Why/Rust concepts/Watch out).
 5. **Review** — `reviewer` reviews the diff; the owner reviews too.
 6. **ADR** — record a decision if one emerged.
-7. **Commit** — conventional commit; pre-commit hooks + CI must pass.
+7. **Commit & PR** — commit in small steps with the `## Explain` block in each
+   commit body (explanation commits are the norm); push the branch and open a
+   pull request to `dev`. CI must pass.
+8. **Merge** — only after the owner validates. The agent never merges on its own.
 
 Small fixes are done directly by the `orchestrator`.
 

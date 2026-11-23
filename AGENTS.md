@@ -39,6 +39,9 @@ Small fixes are done directly by the `orchestrator`.
    (see below). The owner is learning Rust — do not skip this.
 5. **Update memory.** At the end of every task, update `docs/progress.md`
    (status + next actions) and, if a new Rust concept appeared, `docs/lessons.md`.
+6. **Branch per feature, merge on validation.** Work happens on a branch named
+   `<type>/<spec-slug>` branched from `dev`; commits carry the `## Explain` block
+   in their body; nothing is merged until the owner validates.
 
 ## The Explain block
 

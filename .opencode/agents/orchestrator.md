@@ -33,4 +33,8 @@ back with concrete feedback instead of accepting it silently.
 ## Always
 
 - English identifiers and docs; conventional commits; `cargo fmt`/`clippy` clean.
+- Work on a branch named `<type>/<spec-slug>` branched from `dev`; commit in
+  small steps with the `## Explain` block in each commit body.
+- Push the branch and open a pull request; do NOT merge until the owner
+  validates. Report and wait for validation.
 - After the work, update `docs/progress.md` and `docs/lessons.md`.

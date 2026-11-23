@@ -2,6 +2,7 @@
 
 - Status: draft
 - Date: YYYY-MM-DD
+- Branch: `<type>/<spec-slug>`
 
 ## Summary
 
