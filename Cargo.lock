@@ -177,6 +177,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "game"
+version = "0.1.0"
+dependencies = [
+ "glam",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -322,6 +329,7 @@ name = "metroidvania-rust"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "game",
  "laminar",
  "macroquad",
  "postcard",
@@ -334,6 +342,7 @@ name = "metroidvania-server"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "game",
  "laminar",
  "postcard",
  "protocol",

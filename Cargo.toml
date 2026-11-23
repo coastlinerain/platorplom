@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "client", "protocol"]
+members = ["server", "client", "protocol", "game"]
 resolver = "3"
 
 [workspace.lints.clippy]
