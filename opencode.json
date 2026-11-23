@@ -4,5 +4,9 @@
   "instructions": [
     "CONTRIBUTING.md",
     "docs/progress.md"
+  ],
+  "permissions": [
+    { "action": "shell", "resource": "git push *", "effect": "allow" },
+    { "action": "shell", "resource": "git push * main", "effect": "ask" }
   ]
 }
