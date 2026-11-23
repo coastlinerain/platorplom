@@ -74,7 +74,9 @@ the Explain block should already answer it.
   existing Spanish comments/prints).
 - `cargo fmt` clean; `clippy` with no warnings.
 - Prefer `Result`/`Option` and `?` over `unwrap`/`expect` in non-example code.
-- Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
+- Conventional commits: `type(scope): subject`, e.g. `feat(protocol)`, `test(client)`,
+  `chore(ci)`, `docs`. Scopes: `protocol`, `server`, `client`, `workspace`, `docs`,
+  `ci`, `agents`.
 - No magic numbers where a named constant (`config.rs`) already belongs.
 
 ## Testing

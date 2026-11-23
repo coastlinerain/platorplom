@@ -1,7 +1,7 @@
 # Conventional Commits message template (see CONTRIBUTING.md)
 # <type>(<scope>): <subject>
 #   type:    feat | fix | refactor | test | docs | chore
-#   scope:   optional (e.g. server, client, protocol)
+#   scope:   protocol | server | client | workspace | docs | ci | agents
 #   subject: imperative, lowercase, no trailing period
 # Lines starting with # are comments and are ignored by git.
 

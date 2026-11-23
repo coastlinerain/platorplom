@@ -34,7 +34,11 @@ Small fixes are done directly by the `orchestrator`.
 
 ## Commits
 
-Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
+Conventional commits with a scope: `type(scope): subject`, e.g. `feat(protocol)`,
+`test(client)`, `chore(ci)`, `docs`.
+
+- Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
+- Scopes: `protocol`, `server`, `client`, `workspace`, `docs`, `ci`, `agents`.
 
 ## Quality gates
 
