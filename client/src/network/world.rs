@@ -63,7 +63,7 @@ pub fn update_network(world: &mut World) {
     }
 }
 
-fn handle_packet(world: &mut World, decoded: GamePacket) {
+pub fn handle_packet(world: &mut World, decoded: GamePacket) {
     match decoded {
         GamePacket::JoinResponse { assigned_id } => {
             world.id = Some(assigned_id);

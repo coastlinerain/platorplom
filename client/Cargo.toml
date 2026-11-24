@@ -3,6 +3,10 @@ name = "metroidvania-rust"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "metroidvania_rust"
+path = "src/lib.rs"
+
 [dependencies]
 crossbeam-channel = "0.5.15"
 game = { path = "../game" }
