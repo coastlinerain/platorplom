@@ -36,6 +36,9 @@ pub struct World {
     pub jump_sticky: u8,
     pub shoot_sticky: u8,
     pub other_interp: HashMap<u8, RemoteInterp>,
+    // Per-frame edge key state (consumed once in update, read by update_network).
+    pub pressed_jump: bool,
+    pub pressed_shoot: bool,
 }
 
 impl fmt::Debug for World {
@@ -87,6 +90,8 @@ impl World {
             jump_sticky: 0,
             shoot_sticky: 0,
             other_interp: HashMap::new(),
+            pressed_jump: false,
+            pressed_shoot: false,
         }
     }
 
@@ -97,17 +102,25 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
+            // Sample edge keys ONCE per frame (is_key_pressed is stateful — first call consumes).
+            let pressed_jump = is_key_pressed(KeyCode::Space);
+            let pressed_shoot = is_key_pressed(KeyCode::Z);
+
             // --- CLIENT PREDICTION: simulate local player immediately ---
             let local_input = game::entities::player::PlayerInput {
                 move_left: is_key_down(KeyCode::Left),
                 move_right: is_key_down(KeyCode::Right),
-                jump: is_key_pressed(KeyCode::Space), // raw edge for local feel
-                shoot: false,                         // bullet spawn is separate
+                jump: pressed_jump,
+                shoot: false, // bullet spawn is separate
             };
             self.player.update(dt, level, &local_input);
 
+            // Store edge keys so update_network can read them (is_key_pressed is consumed).
+            self.pressed_jump = pressed_jump;
+            self.pressed_shoot = pressed_shoot;
+
             // Spawn own bullet from the authoritative dir when Z is pressed.
-            if is_key_pressed(KeyCode::Z) {
+            if pressed_shoot {
                 self.bullets.push(Bullet::new(
                     self.player.pos + glam::Vec2::new(self.player.w / 2.0, self.player.h / 2.0),
                     self.player.dir,

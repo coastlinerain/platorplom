@@ -21,10 +21,11 @@ pub fn update_network(world: &mut World) {
     // Send: forward inputs to the server each frame (once assigned an id).
     if let Some(id) = world.id {
         // --- Sticky edge handling (D6) ---
-        let (jump, jump_sticky) =
-            prediction::advance_sticky(world.jump_sticky, is_key_pressed(KeyCode::Space));
+        // Read edge keys from World (sampled once in World::update — is_key_pressed is
+        // stateful and consumed on first call).
+        let (jump, jump_sticky) = prediction::advance_sticky(world.jump_sticky, world.pressed_jump);
         let (shoot, shoot_sticky) =
-            prediction::advance_sticky(world.shoot_sticky, is_key_pressed(KeyCode::Z));
+            prediction::advance_sticky(world.shoot_sticky, world.pressed_shoot);
         world.jump_sticky = jump_sticky;
         world.shoot_sticky = shoot_sticky;
 
