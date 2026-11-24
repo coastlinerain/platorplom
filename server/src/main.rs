@@ -1,10 +1,8 @@
 use crossbeam_channel::Sender;
 use laminar::{Packet, Socket, SocketEvent};
+use metroidvania_server::ServerWorld;
 use protocol::GamePacket;
 use std::{collections::HashMap, net::SocketAddr, time::Instant};
-
-mod world;
-use world::ServerWorld;
 
 fn main() {
     let mut socket = Socket::bind("127.0.0.1:12345").unwrap();

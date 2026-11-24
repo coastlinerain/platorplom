@@ -119,6 +119,10 @@ impl ServerWorld {
         &self.players
     }
 
+    pub fn players_mut(&mut self) -> &mut HashMap<u8, Player> {
+        &mut self.players
+    }
+
     pub fn coords(&self) -> &HashMap<u8, (u8, u8)> {
         &self.coords
     }
