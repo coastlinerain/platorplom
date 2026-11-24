@@ -51,7 +51,7 @@ fn handle_death(world: &mut World) {
 
 fn load_current_level(world: &mut World) {
     world.enemies.clear();
-    world.player.bullets.clear();
+    world.bullets.clear();
 
     let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
     world.enemies = enemies_from_data(&level.data);
