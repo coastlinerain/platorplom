@@ -346,7 +346,6 @@ dependencies = [
  "laminar",
  "postcard",
  "protocol",
- "serde",
 ]
 
 [[package]]
