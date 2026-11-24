@@ -227,6 +227,7 @@ impl TestHarness {
         // Step 4: Server update.
         let tick_shots = self.server.update(tick_dt);
         // Accumulate shot counts (server never stores Bullet objects — D6).
+        self.last_shots.clear();
         for &(pid, dir) in &tick_shots {
             *self.total_shots.entry(pid).or_insert(0) += 1;
             self.last_shots.push((pid, dir));

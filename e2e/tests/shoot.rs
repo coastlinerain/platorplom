@@ -51,6 +51,10 @@ fn d3_three_presses_produce_three_bullets() {
         count >= 3,
         "three presses should spawn at least 3 bullets, got {count}"
     );
+    assert!(
+        count <= 9,
+        "multi-fire regression: three presses produced {count} bullets (expected ≤ 9)"
+    );
 }
 
 #[test]
@@ -74,8 +78,15 @@ fn d5_bullet_direction_matches_player_direction() {
     let p0 = h.connect_client();
 
     // Default facing is right (dir = 1.0).
+    // Tick one at a time until the server processes the shoot and
+    // last_shots is populated (happens within 1-3 ticks).
     h.press_shoot(p0);
-    h.tick_n(5);
+    for _ in 0..5 {
+        h.tick();
+        if !h.last_shots.is_empty() {
+            break;
+        }
+    }
 
     let right_shots = h
         .last_shots
@@ -91,7 +102,12 @@ fn d5_bullet_direction_matches_player_direction() {
     h.hold_left(p0, 5);
     h.tick_n(5);
     h.press_shoot(p0);
-    h.tick_n(5);
+    for _ in 0..5 {
+        h.tick();
+        if !h.last_shots.is_empty() {
+            break;
+        }
+    }
 
     let left_shots = h
         .last_shots
@@ -112,9 +128,15 @@ fn d6_remote_receives_action_for_bullet() {
 
     let p0_id = h.client(p0).player_id;
 
-    // p0 shoots.
+    // p0 shoots. Loop until the server processes the shot and
+    // last_actions is populated (happens within 1-3 ticks).
     h.press_shoot(p0);
-    h.tick_n(3);
+    for _ in 0..5 {
+        h.tick();
+        if !h.last_actions.is_empty() {
+            break;
+        }
+    }
 
     // Check that p1 received an Action packet for p0's shoot.
     let actions_for_remote: Vec<_> = h
