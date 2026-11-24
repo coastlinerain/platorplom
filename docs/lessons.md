@@ -300,3 +300,58 @@ Running journal of Rust concepts encountered while building Rustvania.
   `Default`. `VirtualClock` can't derive it because `Instant` doesn't implement
   `Default` (it depends on the system clock), so a manual impl calling `Self::new()`
   is the fix.
+
+### `Option::and_then()` chaining for safe indexing (2026-11-24)
+
+- **Where**: `client/src/network/world.rs` (handle_packet), `client/src/world/lib.rs`
+  (check_level_transitions), `e2e/src/harness.rs` (tick step 7).
+- **What it is**: `Vec::get(idx)` returns `Option<&T>`, avoiding panics on
+  out-of-range access. `Option::and_then(|x| ...)` chains lookups so you can
+  do `levels_matrix.get(cy).and_then(|row| row.get(cx))` to get
+  `Option<&Level>` from a 2D `Vec<Vec<Level>>` without nested indices that
+  could panic.
+- **Gotcha / insight**: Direct `vec[row][col]` indexing panics at runtime with
+  "index out of bounds". The `.get().and_then()` pattern returns `None` for any
+  missing dimension, and `let Some(x) = opt else { return; }` provides a clean
+  early-return for the fail-fast case.
+
+### `colision` vs `solid_in_rect` — OOB asymmetry (2026-11-24)
+
+- **Where**: `game/src/level.rs` (`colision` / `solid_in_rect`), used in
+  reconciliation guard at `client/src/network/world.rs`.
+- **What it is**: `colision` samples 6 points of a rect against `solid_point`,
+  which returns `true` for any coordinate outside the grid — treating OOB as
+  solid. `solid_in_rect` checks tile mappings with bounds guards and treats OOB
+  as non-solid. This asymmetry means `colision` at a room boundary (where part
+  of the player rect extends beyond the level) falsely reports a wall hit,
+  blocking reconciliation. The fix in the `not_in_wall` guard uses
+  `solid_in_rect` instead of `colision` so edge positions are reconciliable.
+- **Gotcha / insight**: When two functions on the same type have opposite OOB
+  semantics, always check which one the calling code expects. The original
+  guard used `colision` and silently skipped reconciliation for all room-edge
+  positions, making room-transition tests impossible until this was fixed.
+
+### Cumulative vs per-tick collection in test harness (2026-11-24)
+
+- **Where**: `e2e/src/harness.rs` (`last_shots`, `last_actions`).
+- **What it is**: Originally `last_shots` was reassigned each tick (`self.last_shots
+  = self.server.update(...)`), so assertions after a `tick_n(5)` only saw the
+  last tick's results. The fix: store the per-tick return value in a local,
+  then `.push()` into `last_shots` and `last_actions` so they accumulate across
+  ticks.
+- **Gotcha / insight**: Integration tests that call `tick_n()` and then inspect
+  harness fields need those fields to be cumulative unless explicitly cleared.
+  Per-tick snapshots (re-assign) are only useful for single-tick assertions.
+
+### Assertion tolerance for deterministic-but-tick-aligned values (2026-11-24)
+
+- **Where**: `e2e/tests/movement.rs` (A7), `e2e/tests/reconciliation.rs` (E6).
+- **What it is**: When the test harness uses `reconcile → predict` order but
+  production uses `predict → reconcile`, the client's predicted position leads
+  the server by exactly one tick of movement (~6.67 px at VELOCIDAD/60).
+  Assertions must account for this constant offset rather than expecting exact
+  equality.
+- **Gotcha / insight**: Frame-alignment differences between test and production
+  are a systemic source of "flaky" assertions. The fix is to compute the
+  expected offset analytically (1 frame × VELOCIDAD × dt) and set the
+  tolerance just above it, rather than using a magic number.

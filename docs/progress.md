@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-24 (Phase 2d infrastructure complete — Boxes 1–8)
+> Last updated: 2026-11-24 (Phase 2d complete — Boxes 1–16, ~116 tests pass)
 
 ## Current status
 
@@ -41,12 +41,13 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Phase 2a — extract `game` core crate (ADR-001 step 1)
 - [x] Phase 2b — server-authoritative movement (server tick loop, inputs)
 - [x] Phase 2c — client prediction + reconciliation
-- [x] Phase 2d — e2e testing infrastructure (infrastructure built, tests pending)
+- [x] Phase 2d — e2e testing infrastructure (all 41 e2e tests pass, ~116 total)
 
 ## Next actions (top = do first)
 
-1. Phase 2d tester writes e2e tests (Boxes 9–14) against the TestHarness API
-2. Phase 2d implementer makes all tests pass; CI updated; quality gates verified
+1. Reviewer (code mode) reviews the Phase 2d diff for correctness and regressions
+2. QA reviews process health and game quality
+3. Owner validates and merges to dev
 
 ## Blockers / notes
 

@@ -1,9 +1,9 @@
 # Phase 2d — End-to-End Testing Infrastructure — Implementation Plan
 
-- Status: implemented (Boxes 1–8 done; Boxes 9–14 pending — tester step)
+- Status: implemented (Boxes 1–16 done; ~116 tests pass)
 - Spec: `docs/specs/phase-2d-e2e-testing.md`
 - Date: 2026-11-24
-- Test count: 75 tests pass (32 game + 24 client + 8 server + 9 protocol + 2 e2e), ~41 e2e tests pending
+- Test count: ~116 tests pass (32 game + 24 client + 8 server + 9 protocol + 2 transport + 41 e2e)
 - Branch: `feat/phase-2d-e2e-testing`
 
 ## Overview
