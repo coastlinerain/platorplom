@@ -90,7 +90,20 @@ Use conventional commits matching the box scope:
 Each commit body must include the standard `## Explain` block (What/Why/Rust
 concepts/Watch out).
 
+### After all boxes are done and committed
+
+As your **final step**, update three documentation files:
+
+1. **`docs/progress.md`** — check the phase checkbox, advance the `Last updated`
+   date, move completed items out of "Next actions" and add the next phase.
+2. **`docs/lessons.md`** — add a new section for this phase. Use the template
+   (Where / What it is / Gotcha) for every genuinely new Rust concept your
+   Explain blocks mention. The raw material is already in your commit messages;
+   transcribe 2-3 sentences per concept.
+3. **`docs/plans/<feature>.md`** — change `Status: draft` to
+   `Status: implemented` and add the date and test count.
+
+Commit this as `docs: finalize Phase <N> plan, progress, and lessons`.
+
 Do **NOT** push, open pull requests, or switch branches. Those remain the
-orchestrator's job. End every report with a short **"Handoff to orchestrator"**
-section that lists anything needing orchestrator permissions (file deletes,
-renames, pushes, branch management) plus any unresolved questions.
+orchestrator's job.
