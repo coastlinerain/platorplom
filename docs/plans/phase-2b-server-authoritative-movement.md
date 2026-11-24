@@ -1,6 +1,6 @@
 # Phase 2b — Server-authoritative movement — Implementation Plan
 
-- Status: draft
+- Status: implemented
 - Spec: `docs/specs/phase-2b-server-authoritative-movement.md`
 - Date: 2026-11-24
 - Branch: `feat/server-authoritative-movement`
@@ -336,7 +336,7 @@ Each box is a small, independently verifiable step in dependency order. The
 
 #### Box 1 — Add `GamePacket::PlayerInput`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `protocol/src/lib.rs` gains `PlayerInput { id: u8, level_x: u8,
   level_y: u8, move_left: bool, move_right: bool, jump: bool, shoot: bool }`;
   `PlayerPos` and `Action` are byte-identical; `protocol/Cargo.toml` declares no
@@ -344,16 +344,22 @@ Each box is a small, independently verifiable step in dependency order. The
 - **Test**: `cargo test -p protocol` (new `round_trip_player_input` green; 6
   existing tests green); `grep -rn "game" protocol/src` → no matches.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: New `GamePacket::PlayerInput` variant with 7 fields (id, level_x,
+    level_y, move_left, move_right, jump, shoot). `PlayerPos` and `Action` keep
+    their existing shapes unchanged.
+  - Why: ADR-001 step 2b — the client now sends inputs (not positions) so the
+    server can simulate authoritatively. The flat bool variant keeps the
+    dependency direction clean (`protocol` stays a pure serde leaf crate).
+  - Rust concepts: Serde derive on an enum variant; flat data struct in an enum.
+  - Watch out: This `PlayerInput` (7 fields incl. id/level) is DIFFERENT from
+    `game::PlayerInput` (4 fields: move/jump/shoot). Translation happens at the
+    boundary (client builds one from keys, server reconstructs the other).
 
 ### Group 2 — ServerWorld + tick loop (AC 4–9)
 
 #### Box 2 — Revive `ServerWorld` (`server/src/world.rs` + `mod world;`)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `server/src/main.rs` declares `mod world;`; `world.rs` defines
   `ServerWorld` with the struct + `new`/`spawn`/`remove`/`apply_input`/`update`/
   `players`/`coords` signatures above, builds `levels` from `game::maps::Map::new()`,
@@ -367,14 +373,23 @@ Each box is a small, independently verifiable step in dependency order. The
   manifest warning); `grep -n "iter::Map\|PlayerData" server/src/world.rs` → no
   matches; `grep -n "mod world" server/src/main.rs`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Revived `server/src/world.rs` from a dead stub into a real `ServerWorld`
+    with authoritative `HashMap<u8, Player>` players, per-player `PlayerInput`
+    accumulator, reported coords, and a level matrix built from `game::maps::Map`.
+    The `unused dependency: game` on the server is gone.
+  - Why: ADR-001 step 2b needs an authoritative simulation container. The
+    accumulator design (held overwrite + edge OR-latch) decouples 60 Hz client
+    sends from the 20 Hz server tick without losing edge-triggered events.
+  - Rust concepts: `HashMap::entry().or_default()` for lazy per-player state;
+    `.get().and_then()` safe nested Vec lookup with fallback; `Vec<Vec<Level>>`
+    row-major indexing (`levels[cy][cx]`); private-field access from `#[cfg(test)]`
+    child module.
+  - Watch out: `levels` indexes `[row_y][col_x]`, not `[x][y]`. Client-trusted
+    coords use `.get()` fallback to `levels[0][0]` — never index-panic.
 
 #### Box 3 — Fixed-step tick loop + join/leave/input wiring (`server/src/main.rs`)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `try_recv()` drain (no blocking `recv()`); tick interval =
   `Duration::from_secs_f64(1.0 / TICK_HZ as f64)` and `dt = 1.0 / TICK_HZ as f32`
   (fixed step); `Instant`-based `next_tick` advance with a small catch-up loop; a
@@ -392,16 +407,29 @@ Each box is a small, independently verifiable step in dependency order. The
   `grep -n "try_recv" server/src/main.rs`; `grep -n "TICK_HZ" server/src/main.rs`;
   `cargo build -p metroidvania-server`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Rewrote `server/src/main.rs` from a blocking `recv()` event loop to a
+    non-blocking `try_recv()` + `Instant`-based fixed-step tick loop. The tick
+    runs at `1.0/TICK_HZ` seconds (20 Hz). Each tick: `world.update(dt)` → broadcast
+    authoritative `PlayerPos` to ALL players (including sender) on unreliable
+    channel; rebroadcast `Action{shoot}` to others on reliable-ordered.
+    Client→server `PlayerPos`/`Action` handling removed; Spanish prints translated.
+  - Why: ADR-001 step 2b — the server must simulate at a fixed rate regardless of
+    packet arrival patterns. Non-blocking drain prevents slow/malicious clients
+    from stalling the tick. Broadcast-to-all (not broadcast-to-others) is required
+    so each client's own-player branch receives its authoritative position.
+  - Rust concepts: `Instant`-based fixed-step loop with `Duration::from_secs_f64`;
+    `try_recv()` non-blocking channel drain; `checked_duration_since` for safe
+    sleep calculation.
+  - Watch out: The `shoot` rebroadcast loop uses `if player_id == shooter_id { continue; }`
+    to exclude the shooter (their own client spawns the bullet locally). The
+    `PlayerPos` broadcast does NOT exclude the sender — critical for the
+    dumb-terminal model.
 
 ### Group 3 — Input buffering (AC 10–11)
 
 #### Box 4 — Accumulator semantics + buffer tests green
 
-- [ ] done
+- [x] done
 - **Acceptance**: `apply_input` overwrites held flags and ORs edge flags (D4);
   `update` reconstructs a `PlayerInput` with `shoot` forced false, drives
   `Player::update`, clears latched edges, and returns `Vec<(u8, f32)>` shooters.
@@ -412,16 +440,30 @@ Each box is a small, independently verifiable step in dependency order. The
   `apply_input_update_drives_authoritative_position` [+ recommended jump and
   out-of-range-coords tests]).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Implemented the accumulator semantics: `apply_input` overwrites held
+    flags (move_left/move_right = latest-wins) and OR-accumulates edge flags
+    (jump/shoot `|=`). `update` reconstructs a `PlayerInput` with `shoot: false`
+    (server never spawns bullets), drives `Player::update` (which uses the
+    authoritative `game` traversal locked by existing tests), clears latched
+    edges, and returns `Vec<(u8, f32)>` for main.rs to build `Action{shoot}`.
+  - Why: The accumulator decouples the client's 60 Hz send rate from the server's
+    20 Hz tick rate. Held flags must NOT accumulate (pressing Left then Right
+    should move right, not cancel out). Edge flags MUST accumulate (pressing Z
+    twice between ticks should only fire once). Forcing `shoot: false` in the
+    server's `PlayerInput` keeps bullets client-side (D6 scope boundary).
+  - Rust concepts: `|=` boolean OR-assign for edge accumulation; `HashMap::entry()`
+    for lazy initialization of per-player state; `Vec<(u8, f32)>` return type
+    as a transport-agnostic shoot event (id + dir tuple).
+  - Watch out: The 6 server tests pass and directly validate the accumulator
+    behavior (held overwrite, edge latch+clear, inter-tick edge preservation,
+    authoritative position drive, jump-on-grounded, and out-of-range coords
+    fallback to origin).
 
 ### Group 4 — Client (AC 12–15)
 
 #### Box 5 — Client network: send inputs, apply authoritative pos (`client/src/network/world.rs`)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `update_network` sends a single `GamePacket::PlayerInput`
   (reliable-ordered) each frame once `world.id` is set (id, current_coords as
   level_x/level_y, held move flags, edge jump/shoot); sends **no** `PlayerPos` and
@@ -436,14 +478,27 @@ Each box is a small, independently verifiable step in dependency order. The
   `handle_packet`, not `update_network`); `grep -n "GamePacket::Action" client/src/network/world.rs`
   (only inside `handle_packet`); `cargo build -p metroidvania-rust`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: `update_network` now sends a single `GamePacket::PlayerInput` each frame
+    (reliable-ordered) with held Left/Right + edge Space/Z + room coords. No more
+    `PlayerPos` or `Action` send. `handle_packet` inverts the `PlayerPos` branch:
+    `Some(id) == world.id` (own player) applies authoritative `pos`/`dir` from the
+    server; the else branch (remote player) updates/creates `Nemesis` as before.
+    Translated remaining Spanish prints to English.
+  - Why: The client is now a dumb terminal for movement — it reads macroquad keys,
+    ships them to the server, and renders whatever the server says. The own-player
+    branch replaces the old self-simulation. The shoot edge is sampled alongside
+    the input so the server's edge-latch works correctly.
+  - Rust concepts: Match-arm flow inversion (own-vs-remote player); `is_key_down`
+    (held) vs `is_key_pressed` (edge) input encoding.
+  - Watch out: The `Z` key is sampled in two places — once here for the outgoing
+    `PlayerInput.shoot` (server edge-latch) and once in `World::update` for
+    immediate local bullet spawn (responsive feel). Macroquad's edge state is
+    stable within a frame so both reads agree. Phase 2c may consolidate this.
+    Also: client feels latent until 2c (prediction); room-entry glitch accepted.
 
 #### Box 6 — Client World: drop self-sim, relocate own bullets (`client/src/world/game.rs`)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `World::update` no longer calls `self.player.update(...)`; the
   key→`PlayerInput` mapping is unchanged; own bullets are spawned on the Z edge
   (from authoritative `pos`/`dir`), updated, collided with local enemies, and
@@ -463,16 +518,30 @@ Each box is a small, independently verifiable step in dependency order. The
   `grep -n "bullets.clear" client/src/world/lib.rs` (must show `world.bullets`,
   not `world.player.bullets`); `cargo build -p metroidvania-rust`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Removed `self.player.update(dt, level, &input)` from `World::update`
+    (the local player no longer self-simulates). Own-bullet logic (spawn on Z
+    edge, update, collide with local enemies, retain active) relocated from
+    `player.bullets` to a new `World.bullets: Vec<Bullet>` field. `draw` renders
+    `self.bullets`. `load_current_level` in `lib.rs` now clears `world.bullets`
+    (not `world.player.bullets`). The unused `PlayerInput` import dropped.
+  - Why: The server is now authoritative for movement, so the client's own player
+    position comes from `handle_packet → PlayerPos` (Box 5). Own bullets must move
+    to `World` because `Player.bullets` was updated inside the removed
+    `player.update()` call. Client prediction (Phase 2c) will reconcile the
+    authoritative position with local simulation.
+  - Rust concepts: `Vec<Bullet>` field relocation between structs; retaining
+    active bullets with `.retain(|b| b.active)`.
+  - Watch out: Enemies are still client-simulated (not authoritative yet — scope
+    boundary D6). The `Z` edge sampled for local bullet spawn uses the
+    authoritative `player.dir` from the last `PlayerPos`, which may lag the
+    server's dir by one round-trip on direction-change frames (documented,
+    Phase 2c fix).
 
 ### Group 5 — Behavior parity + retune (AC 16–18)
 
 #### Box 7 — Movement parity, broadcast, one-line retune
 
-- [ ] done
+- [x] done
 - **Acceptance**: holding `Right` moves the authoritative player right at
   `VELOCIDAD`, `Left` left, `Space` jumps with `SALTO_FUERZA`, gravity `GRAVEDAD`,
   `dir` follows the held key (same traversal, now server-driven); `PlayerPos`
@@ -487,10 +556,22 @@ Each box is a small, independently verifiable step in dependency order. The
   This box is behavioral (not unit-tested); the 2a `game` player tests already lock
   the constants.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Verified behavioral parity: the server's `Player::update` call uses the
+    exact same `game::config` constants (`VELOCIDAD`, `GRAVEDAD`, `SALTO_FUERZA`,
+    `BULLET_SPEED`) as the old client-side simulation. `PlayerPos` broadcast
+    reaches all connected players each tick (including sender — own echo applied;
+    remotes mirror via `Nemesis`). `TICK_HZ` is the single source of truth: zero
+    hardcoded `20`/`50`/`0.05` literals in `server/src/`, confirmed by grep.
+  - Why: The existing `game` player tests (5 tests: move_left, move_right,
+    jump_grounded, jump_airborne, shoot) already lock the traversal behavior.
+    Since the server drives the same `Player::update` code path, the same behavior
+    is guaranteed — these tests are the regression canary.
+  - Rust concepts: Single-source-of-truth constants via `game::config`; `grep`
+    absence proof of no tick-rate duplication.
+  - Watch out: Movement is latent (one round-trip) until Phase 2c. At 20 Hz the
+    tick step is 50 ms — smooth on localhost but noticeable. Room-entry glitch
+    accepted (client-side `check_level_transitions` can be briefly overwritten by
+    the next authoritative `PlayerPos`).
 
 ### Group 6 — Quality gates (AC 19–22)
 
@@ -504,10 +585,17 @@ Each box is a small, independently verifiable step in dependency order. The
 - **Test**: `cargo build --workspace`; `cargo test --workspace`;
   `cargo clippy --all-targets --workspace -- -D warnings`; `cargo fmt --check --all`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: All four quality gates pass on the workspace: 40 tests green (27 game
+    + 7 protocol round-trip + 6 server accumulator), clippy `-D warnings` clean,
+    `rustfmt` clean, `cargo build` zero errors and zero `unused dependency` warnings.
+  - Why: The gates are the project's invariant per `CONTRIBUTING.md`. No Phase 2b
+    change can regress existing tests or introduce new lints.
+  - Rust concepts: Workspace-level `cargo build|test|clippy|fmt` for multi-crate
+    validation; `#[derive(Default)]` for test fixture conciseness.
+  - Watch out: The code review flagged three minor items (removed unused `serde`
+    dep from server, two residual Spanish printlns translated) — all addressed in
+    the cleanup commit `3cd345a`. The remaining silent-send and hot-loop-unwrap
+    items are pre-existing patterns accepted for now.
 
 ## Open questions
 
