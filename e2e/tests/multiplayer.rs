@@ -122,8 +122,12 @@ fn c6_remote_in_different_room_has_different_coords() {
 
     let p0_id = h.client(p0).world.id.unwrap();
 
-    // Transition p0 to room (1, 0).
-    h.set_server_player_pos(p0, 790.0, 320.0);
+    // Transition p0 to room (1, 0).  Place at x=770 so the player's right
+    // edge (800) is exactly at the level boundary — one pixel further right
+    // triggers the transition, and the 2px inset on colision points stays
+    // inside the 800px level (all empty tile in row 8).
+    h.set_server_player_pos(p0, 770.0, 320.0);
+    h.set_client_player_pos(p0, 770.0, 320.0);
     h.hold_right(p0, 10);
     h.tick_n(10);
     assert_eq!(h.client_player_coords(p0), (1, 0));

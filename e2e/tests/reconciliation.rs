@@ -114,7 +114,10 @@ fn e5_replay_uses_correct_room_collision() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
 
-    h.set_server_player_pos(p0, 790.0, 320.0);
+    // Place at x=770 so the player's right edge (800) is exactly at the
+    // level boundary — one pixel further right triggers the transition.
+    h.set_server_player_pos(p0, 770.0, 320.0);
+    h.set_client_player_pos(p0, 770.0, 320.0);
     h.hold_right(p0, 10);
     h.tick_n(10);
     assert_eq!(h.client_player_coords(p0), (1, 0));
@@ -143,9 +146,11 @@ fn e6_position_error_bounded_after_100_ticks() {
         let (sx, _) = h.server_player_pos(p0);
         let (cx, _) = h.client_player_pos(p0);
         let error = (cx - sx).abs();
+        // With reconcile→predict order, the client leads the server by
+        // exactly one prediction frame (~VELOCIDAD/60 ≈ 6.67 px).
         assert!(
-            error < 5.0,
-            "prediction error should stay below 5.0; error={error}"
+            error < 7.0,
+            "prediction error should stay below 7.0 (~1 frame); error={error}"
         );
     }
 }

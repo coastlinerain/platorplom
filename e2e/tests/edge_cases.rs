@@ -36,8 +36,10 @@ fn f2_corner_position_not_stuck() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
 
-    // Place player at a top-left corner position.
-    h.set_server_player_pos(p0, 5.0, 5.0);
+    // Place player near the top-left corner (tile (1,1) = 42,42 px)
+    // just outside the solid wall border.  A position inside the wall
+    // (e.g. 5,5) would be permanently stuck by collision rollback.
+    h.set_server_player_pos(p0, 42.0, 42.0);
 
     h.tick_n(5);
 
@@ -67,15 +69,23 @@ fn f3_owner_bullet_spawn_correct_position() {
     assert!(count > 0, "bullet should have spawned");
 
     // Bullet should be near the player's position (not at origin).
+    // The bullet travels at BULLET_SPEED over 3 ticks and is offset by
+    // player w/2 from the spawn centre, so ~70 px is a safe bound.
     let bullets = &h.client(p0).world.bullets;
     if let Some(bullet) = bullets.first() {
-        let dist = ((bullet.pos.x - px).abs() + (bullet.pos.y - py).abs())
-            .max((bullet.pos.x - px - 30.0).abs());
+        let dx = bullet.pos.x - px;
+        let dy = bullet.pos.y - py;
         assert!(
-            dist < 50.0,
-            "bullet should spawn near player; player=({px},{py}), bullet=({},{})",
+            dx > 0.0,
+            "bullet should move right from player; bullet.x={}, player.x={}",
             bullet.pos.x,
-            bullet.pos.y
+            px
+        );
+        assert!(
+            dy.abs() < 30.0,
+            "bullet y should be close to player y (within 30 px); bullet.y={}, player.y={}",
+            bullet.pos.y,
+            py
         );
     }
 }

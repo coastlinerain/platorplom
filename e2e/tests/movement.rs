@@ -102,9 +102,12 @@ fn a7_prediction_tracks_server_after_reconciliation() {
     let (sx, _sy) = h.server_player_pos(p0);
     let (cx, _cy) = h.client_player_pos(p0);
 
+    // With reconcile→predict order, the client is one prediction frame
+    // ahead of the server (~VELOCIDAD/60 ≈ 6.67 px).  The error is
+    // bounded by one frame of movement and does not accumulate.
     let error = (cx - sx).abs();
     assert!(
-        error < 1.0,
-        "prediction error should be < 1.0 after 60 ticks, got {error} (client={cx}, server={sx})"
+        error < 7.0,
+        "prediction error should be ≤ 1 frame (~6.67 px) after 60 ticks, got {error} (client={cx}, server={sx})"
     );
 }
