@@ -29,6 +29,12 @@ permissions:
   - action: shell
     resource: "git show *"
     effect: allow
+  - action: shell
+    resource: "git add *"
+    effect: allow
+  - action: shell
+    resource: "git commit *"
+    effect: allow
 ---
 
 You write automated tests for the project and run them. Follow the conventions in
@@ -47,10 +53,19 @@ round-trips (postcard), map parsing, and collision
 
 ## Responsibility boundary
 
-Your shell is scoped: you cannot delete/rename files (`rm`/`mv`) or run mutating
-git (`git add`/`commit`/`push`). If a plan step requires moving or deleting an
-existing test file (e.g. relocating tests into a new crate or module), do NOT
-attempt `rm`/`mv` — instead stop and report it as a **"Handoff to orchestrator"**
-item listing the exact paths, so the orchestrator performs the destructive
-filesystem operation. End every report with any such handoff items plus
+Your shell is scoped: you cannot delete/rename files (`rm`/`mv`), push, or
+manage branches (`git push`/`branch`/`merge`). If a plan step requires moving or
+deleting an existing test file (e.g. relocating tests into a new crate or
+module), do NOT attempt `rm`/`mv` — instead stop and report it as a **"Handoff
+to orchestrator"** item listing the exact paths.
+
+## Committing your work
+
+You **can** stage and commit: `git add`, `git commit`, and `git checkout` (to
+revert a bad edit) are allowed. Commit your RED tests once they are written,
+with a conventional commit such as `test(scope): add RED tests for <feature>`.
+Include the standard `## Explain` block.
+
+Do **NOT** push or switch branches — those remain the orchestrator's job. End
+every report with handoff items for any destructive filesystem operations plus
 unresolved questions.
