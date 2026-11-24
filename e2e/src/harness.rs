@@ -429,6 +429,54 @@ impl TestHarness {
         }
     }
 
+    /// Return a reference to the client with the given handle.
+    pub fn client(&self, handle: ClientHandle) -> &TestClient {
+        self.clients
+            .iter()
+            .find(|c| c.handle == handle)
+            .expect("client not found")
+    }
+
+    /// Return a mutable reference to the client with the given handle.
+    pub fn client_mut(&mut self, handle: ClientHandle) -> &mut TestClient {
+        self.clients
+            .iter_mut()
+            .find(|c| c.handle == handle)
+            .expect("client not found")
+    }
+
+    /// Disconnect a client: remove from server, broadcast Leave to remaining
+    /// clients, and drop channels. Panics if handle is not found.
+    pub fn disconnect_client(&mut self, handle: ClientHandle) {
+        let player_id = self.player_id_for(handle);
+
+        // Find the client index.
+        let idx = self
+            .clients
+            .iter()
+            .position(|c| c.handle == handle)
+            .expect("client to disconnect not found");
+
+        // Remove from server world.
+        self.server.remove(player_id);
+
+        // Broadcast Leave to all remaining clients.
+        for (i, _client) in self.clients.iter().enumerate() {
+            if i == idx {
+                continue;
+            }
+            let packet = GamePacket::Leave { id: player_id };
+            if let Ok(bytes) = postcard::to_allocvec(&packet) {
+                let _ = self.to_clients[i].send(bytes);
+            }
+        }
+
+        // Remove the client and its channels.
+        self.clients.remove(idx);
+        self.from_clients.remove(idx);
+        self.to_clients.remove(idx);
+    }
+
     pub fn advance_clock(&mut self, ms: u64) {
         self.clock.advance(ms);
     }
