@@ -9,6 +9,7 @@ pub struct ServerWorld {
     coords: HashMap<u8, (u8, u8)>,
     levels: Vec<Vec<Level>>,
     max_seq: HashMap<u8, u16>,
+    shoot_cooldown: HashMap<u8, u8>,
 }
 
 impl ServerWorld {
@@ -34,6 +35,7 @@ impl ServerWorld {
             coords: HashMap::new(),
             levels,
             max_seq: HashMap::new(),
+            shoot_cooldown: HashMap::new(),
         }
     }
 
@@ -105,9 +107,14 @@ impl ServerWorld {
             // Clear latched edge flags now that they've been consumed.
             pending.jump = false;
 
-            // If shoot was latched, record the shot for the rebroadcast (id, dir).
-            if pending.shoot {
+            // If shoot was latched and cooldown is expired, record the shot.
+            let cd = self.shoot_cooldown.entry(id).or_insert(0);
+            if pending.shoot && *cd == 0 {
                 shots.push((id, player.dir));
+                *cd = 5; // ~83 ms cooldown at 60 Hz — long enough to absorb sticky-edge spread (3 frames) without blocking rapid presses
+            }
+            if *cd > 0 {
+                *cd -= 1;
             }
             pending.shoot = false;
         }

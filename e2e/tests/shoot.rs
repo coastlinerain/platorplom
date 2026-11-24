@@ -40,11 +40,11 @@ fn d3_three_presses_produce_three_bullets() {
     // between 5 and 9 server shots depending on frame alignment.
     // The test asserts only the lower bound (≥ 3).
     h.press_shoot(p0);
-    h.tick_n(5);
+    h.tick_n(8);
     h.press_shoot(p0);
-    h.tick_n(5);
+    h.tick_n(8);
     h.press_shoot(p0);
-    h.tick_n(5);
+    h.tick_n(8);
 
     let count = h.server_bullet_count(p0);
     assert!(
@@ -52,8 +52,8 @@ fn d3_three_presses_produce_three_bullets() {
         "three presses should spawn at least 3 bullets, got {count}"
     );
     assert!(
-        count <= 9,
-        "multi-fire regression: three presses produced {count} bullets (expected ≤ 9)"
+        count <= 6,
+        "multi-fire regression: three presses produced {count} bullets (expected ≤ 6 with cooldown)"
     );
 }
 

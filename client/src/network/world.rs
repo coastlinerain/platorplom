@@ -129,9 +129,33 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                     n.coords = (level_x as usize, level_y as usize);
                     n
                 });
-                // Update raw pos/dir/coords for non-interpolation fallback.
-                nemesis.pos = glam::Vec2::new(x, y);
-                nemesis.last_dir = dir;
+                // Only update raw pos when the server-reported position is
+                // within the bounds of the VIEWER's current room. After a room
+                // transition, the server's position may still be at the old
+                // room boundary (e.g., x=790 in a 400 px-wide room) which
+                // renders the nemesis off-screen.
+                let same_room = level_x as usize == world.current_coords.0
+                    && level_y as usize == world.current_coords.1;
+                let pos_in_viewer_bounds = if same_room {
+                    if let Some(viewer_level) = world
+                        .levels_matrix
+                        .get(world.current_coords.1)
+                        .and_then(|row| row.get(world.current_coords.0))
+                    {
+                        x >= 0.0
+                            && y >= 0.0
+                            && x < viewer_level.pixel_width()
+                            && y < viewer_level.pixel_height()
+                    } else {
+                        false
+                    }
+                } else {
+                    true // different room — position doesn't affect viewer
+                };
+                if pos_in_viewer_bounds {
+                    nemesis.pos = glam::Vec2::new(x, y);
+                    nemesis.last_dir = dir;
+                }
                 nemesis.coords = (level_x as usize, level_y as usize);
 
                 let interp = world.other_interp.entry(id).or_default();

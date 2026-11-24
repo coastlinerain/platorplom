@@ -7,7 +7,7 @@ use crate::world::lib::{
 
 use crate::network::interpolation::RemoteInterp;
 use crate::network::prediction::InputRingBuffer;
-use crate::network::world::{send_join_req, update_network};
+use crate::network::world::update_network;
 use game::entities::bullet::Bullet;
 use game::entities::enemy::Enemy;
 use game::entities::nemesis::Nemesis;
@@ -58,8 +58,10 @@ impl fmt::Debug for World {
 }
 
 impl World {
-    pub fn new(matrix_data: Map, mut network: Box<dyn PacketIO>) -> Self {
-        send_join_req(&mut *network);
+    pub fn new(matrix_data: Map, network: Box<dyn PacketIO>) -> Self {
+        // JoinRequest is sent from main.rs before World is constructed.
+        // Do NOT call send_join_req here — that would send a second
+        // JoinRequest, creating a duplicate player on the server.
 
         let levels: Vec<Vec<Level>> = matrix_data
             .grids
@@ -101,7 +103,9 @@ impl World {
     }
 
     pub fn update(&mut self, dt: f32) {
-        check_level_transitions(self);
+        // Run transition check AFTER bullet-vs-enemy collision so bullets
+        // can hit enemies on the frame they're fired, even if the player
+        // crosses a room boundary on the same frame.
         update_enemy_bullets_position(self, dt);
         check_player_death(self);
         {
@@ -162,6 +166,9 @@ impl World {
             self.camera
                 .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
+        // Must run AFTER bullet collision so bullets can hit enemies before
+        // load_current_level (called by check_level_transitions) clears them.
+        check_level_transitions(self);
         update_network(self);
 
         self.bullets.retain(|b| b.active);
