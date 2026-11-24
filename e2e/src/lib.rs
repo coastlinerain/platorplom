@@ -4,5 +4,5 @@
 pub mod harness;
 pub mod transport;
 
-pub use harness::{ClientHandle, TestClient, TestHarness, TestServer, VirtualClock};
+pub use harness::{ClientHandle, TestClient, TestHarness, VirtualClock};
 pub use transport::LoopbackTransport;

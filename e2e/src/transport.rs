@@ -1,4 +1,4 @@
-use client::network::packet_io::PacketIO;
+use metroidvania_rust::network::packet_io::PacketIO;
 use protocol::GamePacket;
 use std::sync::mpsc;
 
