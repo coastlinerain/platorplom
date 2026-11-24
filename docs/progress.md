@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-23
+> Last updated: 2026-11-24
 
 ## Current status
 
@@ -39,15 +39,15 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Remove dead code (`try_move`, `spawn_entities`)
 - [x] Finalize ADR-001 networking model → server-authoritative (Accepted)
 - [x] Phase 2a — extract `game` core crate (ADR-001 step 1)
-- [ ] Phase 2b — server-authoritative movement (server tick loop, inputs)
+- [x] Phase 2b — server-authoritative movement (server tick loop, inputs)
 - [ ] Phase 2c — client prediction + reconciliation
 
 ## Next actions (top = do first)
 
-1. Phase 2b — server-authoritative movement (server tick loop @ 20 Hz `TICK_HZ`,
-   client sends inputs instead of positions).
-2. Phase 2c — client prediction + reconciliation.
-3. Consider client lib/bin split to enable `client/tests/` integration tests.
+1. Phase 2c — client prediction + reconciliation (interpolate between
+   authoritative snapshots, reconcile local prediction against server state,
+   buffer smoothing to hide 20 Hz tick steps).
+2. Consider client lib/bin split to enable `client/tests/` integration tests.
 
 ## Blockers / notes
 
@@ -61,9 +61,8 @@ Working memory for the project. **Update this at the end of every task.**
 - (follow-up) `Potion` is intended to be a collectible entity, not an enemy. The
   current `PotionSpawn → green Enemy` is a placeholder; a future phase should
   introduce a real `Potion` collectible and retire `EnemyKind::Potion`.
-- (2b forward note) Enemy RNG is drawn once per frame in `World::update` and
-  passed into `Enemy::update`, which only consumes it when the timer elapses.
-  Behavior is unchanged today, but 2b must NOT replicate a frame-rate-dependent
-  draw count — the server should use its own seedable RNG and draw
-  deterministically (one draw per enemy per decision at the fixed tick), or
-  client/server will desync.
+- (2b complete) Server-authoritative movement landed on `feat/server-authoritative-movement`
+  (4 commits, 40 tests, all gates green). Client is a dumb terminal for movement
+  (latent until 2c). Room-entry glitch accepted (client-side transitions briefly
+  overwritten by authoritative `PlayerPos`). Enemy RNG stays client-side for now
+  (the server does not simulate enemies — scope boundary D6).

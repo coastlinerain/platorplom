@@ -62,3 +62,35 @@ fn round_trip_hit() {
     round_trip(GamePacket::Hit { entity_id: 0 });
     round_trip(GamePacket::Hit { entity_id: 255 });
 }
+
+#[test]
+fn round_trip_player_input() {
+    round_trip(GamePacket::PlayerInput {
+        id: 7,
+        level_x: 1,
+        level_y: 2,
+        move_left: true,
+        move_right: false,
+        jump: true,
+        shoot: false,
+    });
+    // Complement bits / extremes: prove every bool and byte survives postcard.
+    round_trip(GamePacket::PlayerInput {
+        id: 0,
+        level_x: 0,
+        level_y: 0,
+        move_left: false,
+        move_right: false,
+        jump: false,
+        shoot: false,
+    });
+    round_trip(GamePacket::PlayerInput {
+        id: 255,
+        level_x: 255,
+        level_y: 255,
+        move_left: true,
+        move_right: true,
+        jump: true,
+        shoot: true,
+    });
+}

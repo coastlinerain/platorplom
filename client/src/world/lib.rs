@@ -43,7 +43,7 @@ fn handle_death(world: &mut World) {
         ));
     }
 
-    println!("¡Has muerto! Volviendo al inicio...");
+    println!("You died! Returning to start...");
     world.current_coords = (0, 0);
     world.player.pos = vec2(100.0, 100.0);
     load_current_level(world);
@@ -51,13 +51,13 @@ fn handle_death(world: &mut World) {
 
 fn load_current_level(world: &mut World) {
     world.enemies.clear();
-    world.player.bullets.clear();
+    world.bullets.clear();
 
     let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
     world.enemies = enemies_from_data(&level.data);
 
     println!(
-        "Nivel {},{} cargado con {} enemigos",
+        "Level {},{} loaded with {} enemies",
         world.current_coords.0,
         world.current_coords.1,
         world.enemies.len()
@@ -73,7 +73,7 @@ pub fn check_level_transitions(world: &mut World) {
 
     // --- SALIDA DERECHA ---
     if p.pos.x + p.w > level_w - 5.0 {
-        // Un pequeño margen de 5px
+        // A small 5px margin
         if cx < world.levels_matrix[0].len() - 1 {
             world.current_coords.0 += 1;
             p.pos.x = 10.0;
@@ -104,7 +104,7 @@ pub fn check_level_transitions(world: &mut World) {
 
     if changed {
         println!(
-            "Cambiado a nivel: {},{}",
+            "Level changed: {},{}",
             world.current_coords.0, world.current_coords.1
         );
         load_current_level(world);

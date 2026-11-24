@@ -9,7 +9,7 @@ use crate::network::world::{send_join_req, update_network};
 use game::entities::bullet::Bullet;
 use game::entities::enemy::Enemy;
 use game::entities::nemesis::Nemesis;
-use game::entities::player::{Player, PlayerInput};
+use game::entities::player::Player;
 use game::level::Level;
 use game::maps::Map;
 use macroquad::prelude::*;
@@ -20,12 +20,13 @@ pub struct World {
     pub id: Option<u8>,
     pub player: Player,
     pub enemies: Vec<Enemy>,
-    pub levels_matrix: Vec<Vec<Level>>, // Matriz de niveles
+    pub levels_matrix: Vec<Vec<Level>>,
     pub current_coords: (usize, usize),
     pub camera: GameCamera,
     pub network: crate::network::client::NetworkClient,
     pub other_players: HashMap<u8, Nemesis>,
     pub enemy_bullets: Vec<Bullet>,
+    pub bullets: Vec<Bullet>, // own bullets (relocated from Player; server-authoritative)
 }
 
 impl fmt::Debug for World {
@@ -58,9 +59,6 @@ impl World {
             })
             .collect();
 
-        // Spawn the starting room (0, 0) once on construction. The borrow of
-        // `levels[0][0].data` must end before `levels` is moved into the struct
-        // literal below.
         let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data);
 
         Self {
@@ -73,8 +71,10 @@ impl World {
             network,
             other_players: HashMap::new(),
             enemy_bullets: Vec::new(),
+            bullets: Vec::new(),
         }
     }
+
     pub fn update(&mut self, dt: f32) {
         check_level_transitions(self);
         update_enemy_bullets_position(self, dt);
@@ -82,35 +82,47 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
-            // Build the input from macroquad keys each frame. `move_*` are held
-            // (is_key_down), `jump`/`shoot` are edge-triggered (is_key_pressed).
-            let input = PlayerInput {
-                move_left: is_key_down(KeyCode::Left),
-                move_right: is_key_down(KeyCode::Right),
-                jump: is_key_pressed(KeyCode::Space),
-                shoot: is_key_pressed(KeyCode::Z),
-            };
+            // The local player no longer self-simulates — the server is
+            // authoritative.  Own-bullet logic (spawn/update/collide) is
+            // relocated here.
 
-            self.player.update(dt, level, &input);
+            // Spawn own bullet from the authoritative dir when Z is pressed.
+            if is_key_pressed(KeyCode::Z) {
+                self.bullets.push(Bullet::new(
+                    self.player.pos + glam::Vec2::new(self.player.w / 2.0, self.player.h / 2.0),
+                    self.player.dir,
+                    self.player.id,
+                ));
+            }
 
+            // Update own bullets.
+            for bullet in &mut self.bullets {
+                bullet.update(dt, level);
+            }
+
+            // Collide own bullets with local enemies.
+            for bullet in &mut self.bullets {
+                for enemy in &mut self.enemies {
+                    if bullet.check_collision(enemy) {
+                        bullet.active = false;
+                        enemy.die();
+                        println!("Enemy hit!");
+                    }
+                }
+            }
+
+            // Enemies still simulated client-side (not authoritative yet).
             for enemy in &mut self.enemies {
                 let random = macroquad::rand::gen_range(0, 4);
                 enemy.update(dt, level, random);
             }
 
-            for bullet in &mut self.player.bullets {
-                for enemy in &mut self.enemies {
-                    if bullet.check_collision(enemy) {
-                        bullet.active = false;
-                        enemy.die();
-                        println!("¡Enemigo alcanzado!");
-                    }
-                }
-            }
             self.camera
                 .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
         update_network(self);
+
+        self.bullets.retain(|b| b.active);
         self.enemies.retain(|e| e.alive);
     }
 
@@ -120,30 +132,34 @@ impl World {
         let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
         level.draw();
 
-        // --- RENDERIZAR OTROS JUGADORES ---
+        // Remote players (mirrored via Nemesis).
         for enemy in self.other_players.values() {
             if enemy.coords == self.current_coords {
                 enemy.draw();
             }
         }
 
+        // Own player.
         self.player.draw();
 
-        for bullet in &self.player.bullets {
+        // Own bullets.
+        for bullet in &self.bullets {
             bullet.draw();
         }
 
+        // Remote enemy bullets.
         for bullet in &self.enemy_bullets {
             bullet.draw();
         }
 
+        // Local enemies.
         for enemy in &self.enemies {
             enemy.draw();
         }
 
         set_default_camera();
 
-        // --- HUD (Coordenadas de pantalla fija) ---
+        // HUD (screen-space).
         draw_text(
             format!("Level: {},{}", self.current_coords.0, self.current_coords.1),
             10.0,

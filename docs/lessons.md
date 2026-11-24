@@ -67,3 +67,76 @@ Running journal of Rust concepts encountered while building Rustvania.
   (`client`) into a library crate (`game`) makes it unit-testable headlessly and
   shareable with the server. The `Entity` trait's `update`/`draw` split across
   crates is the key structural move.
+
+## Phase 2b (2026-11-24) — server-authoritative movement
+
+- **`Instant`-based fixed-step game loop** (`server/src/main.rs`) — instead of
+  blocking on `recv()` and processing one event at a time, the server drains
+  `try_recv()` (non-blocking) and runs simulation ticks at a fixed interval via
+  `Instant::now() >= next_tick`. Each tick advances `next_tick += tick_interval`,
+  and a catch-up loop handles overruns. This decouples network I/O cadence from
+  simulation cadence — the server ticks at exactly `TICK_HZ` regardless of how
+  many packets arrive between ticks.
+  - **Gotcha**: `Instant::duration_since` panics if `now < next_tick` (time
+    monotonicity), so use `next_tick.checked_duration_since(Instant::now())`
+    instead when computing the idle sleep.
+
+- **`Duration::from_secs_f64`** (`server/src/main.rs`) — converts a fractional
+  second (`1.0 / TICK_HZ as f64`) into a `Duration`. The `_f64` variant accepts
+  sub-millisecond precision; `from_secs_f32` exists too. Use this to derive tick
+  intervals from a const Hz value without hardcoding milliseconds.
+
+- **`HashMap::entry().or_default()`** (`server/src/world.rs`) — a lazy-init
+  pattern: `map.entry(key).or_default()` returns a `&mut V` to either the
+  existing value or a freshly-inserted `Default::default()`. More concise than
+  `if !map.contains_key(&k) { map.insert(k, Default::default()); } map.get_mut(&k)`.
+  Used in `ServerWorld::apply_input` to initialize per-player accumulators on
+  first sight.
+  - **Gotcha**: `or_default()` requires `V: Default`. `PlayerInput` derives
+    `Default` (all fields `false`), so it works — but if `V` doesn't implement
+    `Default`, use `or_insert_with(|| ...)` instead.
+
+- **`.get().and_then()` for safe nested `Vec` lookup with fallback**
+  (`server/src/world.rs`) — `levels.get(y).and_then(|row| row.get(x))` returns
+  `Option<&Level>`, safely handling out-of-bounds indices for BOTH dimensions in
+  one chain. Combined with `.unwrap_or(&levels[0][0])`, it provides a graceful
+  fallback for client-trusted coordinates that might be bogus (e.g. `(255,255)`).
+  - **Gotcha**: the chained `Option` only short-circuits on `None` from `.get()`.
+    If `row.get(x)` returns `Some`, the `and_then` closure fires. This pattern beats
+    nested `if y < levels.len() && x < levels[y].len()` bounds checks.
+
+- **Match-arm flow inversion** (`client/src/network/world.rs`) — the old
+  `handle_packet` tested `if Some(id) != world.id` (remote player branch first,
+  own player branch absent/silent). The new code tests `if Some(id) == world.id`
+  (own player branch first: apply authoritative pos/dir from server), with the
+  else branch handling remote `Nemesis` mirroring unchanged. A small but critical
+  inversion: the own player now *receives* its state from the network instead of
+  *sending* it.
+  - **Insight**: this is the code-level manifestation of the architectural shift
+    from "client broadcasts position" to "server broadcasts position, client
+    applies it."
+
+- **`Vec<T>` field relocation between structs** (`client/src/world/game.rs`) —
+  moving `bullets: Vec<Bullet>` from `Player` into `World` is a mechanical
+  refactor: every `self.player.bullets.push(...)`/`.retain(...)`/`.iter()` becomes
+  `self.bullets.push(...)`/etc. The field's ownership moves up one level in the
+  struct hierarchy because the code that populates and drains it (bullet
+  spawn/update/collide) moved from `Player::update` into `World::update`.
+  - **Gotcha**: any other code that referenced `player.bullets` must be updated
+    too — in this case `load_current_level` (which cleared on death/room change)
+    and `draw` (which rendered). A `grep` for the old path catches leftovers.
+
+- **`|=` boolean OR-assignment for edge accumulation**
+  (`server/src/world.rs`) — `pending.jump |= input.jump` accumulates edge flags
+  across multiple input packets between ticks. If the client sends `jump: true`
+  twice, the accumulator stays `true` (OR is idempotent). This is the complement
+  of the held-flag pattern (`pending.move_left = input.move_left`, which
+  overwrites). Together they implement "latest held wins, edges latch."
+  - **Insight**: `|=` on a `bool` is just a logical OR — `a |= b` is `a = a || b`.
+    Rust's `|=` is defined for `bool` via `std::ops::BitOrAssign`.
+
+- **`#[derive(Default)]` on `PlayerInput`** — the `Default` derive generates
+  `PlayerInput { move_left: false, move_right: false, jump: false, shoot: false }`,
+  which is exactly the "no input" state. Used in test fixtures
+  (`PlayerInput { move_right: true, ..Default::default() }`) and when inserting
+  a fresh accumulator entry via `or_default()`.

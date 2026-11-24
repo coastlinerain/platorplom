@@ -7,7 +7,7 @@ permissions:
     effect: deny
   - action: question
     resource: "*"
-    effect: deny
+    effect: allow
   - action: edit
     resource: "*"
     effect: deny
@@ -34,3 +34,15 @@ The plan must contain:
 
 Keep steps small enough that each is independently verifiable. Do not write
 production code or edit anything outside `docs/plans/`.
+
+## When to ask the owner
+
+You may use the `question` tool to consult the owner during planning — their
+opinion should shape the plan, not just gate it afterward. Ask when the spec is
+ambiguous on a genuine trade-off (e.g. an implementation approach with different
+complexity/simplicity costs, a test-vs-no-test boundary, or an unresolved product
+decision). Give a recommendation as the first option.
+
+Do NOT ask about things the spec already decided or you can read from the code.
+Batch related questions into one `question` call, and pause for the answer before
+finalizing the plan.

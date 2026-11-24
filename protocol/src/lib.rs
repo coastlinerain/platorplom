@@ -23,4 +23,13 @@ pub enum GamePacket {
     Hit {
         entity_id: u8,
     },
+    PlayerInput {
+        id: u8,
+        level_x: u8,
+        level_y: u8,
+        move_left: bool,
+        move_right: bool,
+        jump: bool,
+        shoot: bool,
+    },
 }
