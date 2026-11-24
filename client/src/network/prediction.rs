@@ -13,7 +13,6 @@ pub struct InputEntry {
 }
 
 impl InputEntry {
-    #[expect(dead_code)]
     pub fn from_game_input(seq: u16, input: &PlayerInput) -> Self {
         Self {
             seq,
@@ -82,14 +81,18 @@ impl InputRingBuffer {
         })
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.len
+    }
+}
+
+impl Default for InputRingBuffer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

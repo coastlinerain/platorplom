@@ -67,3 +67,9 @@ impl GameCamera {
         set_camera(&self.cam);
     }
 }
+
+impl Default for GameCamera {
+    fn default() -> Self {
+        Self::new()
+    }
+}

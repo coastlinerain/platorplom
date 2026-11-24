@@ -105,6 +105,12 @@ impl RemoteInterp {
     }
 }
 
+impl Default for RemoteInterp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RemoteInterp;

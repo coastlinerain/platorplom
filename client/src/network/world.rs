@@ -1,4 +1,3 @@
-use crate::network::interpolation::RemoteInterp;
 use crate::network::packet_io::PacketIO;
 use crate::network::prediction::{self, InputEntry, InputRingBuffer};
 use crate::world::game::World;
@@ -123,7 +122,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 let interp = world
                     .other_interp
                     .entry(id)
-                    .or_insert_with(RemoteInterp::new);
+                    .or_default();
                 interp.push(nemesis, x, y, dir);
             }
         }
