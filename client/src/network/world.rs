@@ -87,17 +87,36 @@ fn handle_packet(world: &mut World, decoded: GamePacket) {
         } => {
             if Some(id) == world.id {
                 // --- RECONCILIATION for own player ---
-                let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
-                prediction::reconcile(
-                    &mut world.player,
-                    &mut world.input_buffer,
-                    &mut world.last_acked_seq,
-                    x,
-                    y,
-                    dir,
-                    last_seq,
-                    level,
-                );
+                // Guard: only reconcile when the server's reported room matches
+                // the client's current room AND the server position is not inside
+                // a solid tile. Without this, crossing a room boundary rewinds the
+                // player into a wall (the server never teleports on room transition
+                // — D9 scope boundary — so its position lags behind the client's).
+                let coords_match = level_x as usize == world.current_coords.0
+                    && level_y as usize == world.current_coords.1;
+                if coords_match {
+                    let level =
+                        &world.levels_matrix[world.current_coords.1][world.current_coords.0];
+                    let in_bounds =
+                        x >= 0.0 && y >= 0.0 && x < level.pixel_width() && y < level.pixel_height();
+                    let not_in_wall =
+                        in_bounds && !level.colision(x, y, world.player.w, world.player.h);
+                    if not_in_wall {
+                        prediction::reconcile(
+                            &mut world.player,
+                            &mut world.input_buffer,
+                            &mut world.last_acked_seq,
+                            x,
+                            y,
+                            dir,
+                            last_seq,
+                            level,
+                        );
+                    }
+                }
+                // else: server is reporting position from a different room (or
+                // inside a wall) — skip reconciliation; client prediction is
+                // more correct until the server position catches up.
             } else {
                 // --- Remote player: push interpolation snapshot ---
                 let nemesis = world.other_players.entry(id).or_insert_with(|| {
