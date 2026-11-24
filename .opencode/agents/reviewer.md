@@ -54,3 +54,14 @@ You may run read-only verification commands (`cargo build`/`test`/`clippy`,
 `cargo fmt --check`, and read-only git: `diff`/`status`/`log`/`show`). Never run
 mutating commands (`git commit`/`push`/`add`/`checkout`/`rm`, bare `cargo fmt`,
 or other non-verification shell).
+
+**Scope of your shell access (do NOT attempt anything else).** Your shell
+permission is limited to exactly these, and nothing more:
+- `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt --check` (use `--workspace`/
+  `-p <crate>`/`--all-targets` as needed) — for verifying gates only.
+- read-only git: `git diff`, `git status`, `git log`, `git show`.
+
+Do not run `echo`, `ls`, `cat`, `which`, `cargo build --version`, arbitrary
+shell commands, or anything not listed above — they are outside your scope and
+your permission will reject them. If you need to read a file, use your read
+tool; if you need to confirm a gate, use only the `cargo` commands above.
