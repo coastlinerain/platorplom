@@ -1,7 +1,10 @@
 use crossbeam_channel::Sender;
 use laminar::{Packet, Socket, SocketEvent};
 use protocol::GamePacket;
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, time::Instant};
+
+mod world;
+use world::ServerWorld;
 
 fn main() {
     let mut socket = Socket::bind("127.0.0.1:12345").unwrap();
@@ -10,136 +13,174 @@ fn main() {
 
     let _thread = std::thread::spawn(move || socket.start_polling());
 
-    let mut next_id = 1;
-    let mut players = HashMap::new();
+    let mut next_id: u8 = 1;
+    let mut addrs: HashMap<SocketAddr, u8> = HashMap::new();
 
-    println!("Servidor de Rustvania corriendo en el puerto 12345...");
+    // Build the authoritative simulation world from the shared map data.
+    let mut world = ServerWorld::new();
+
+    let tick_interval = std::time::Duration::from_secs_f64(1.0 / game::config::TICK_HZ as f64);
+    let tick_dt = 1.0 / game::config::TICK_HZ as f32;
+    let mut next_tick = Instant::now() + tick_interval;
+
+    println!(
+        "Rustvania server running on port 12345 ({} Hz)",
+        game::config::TICK_HZ
+    );
 
     loop {
-        if let Ok(event) = event_receiver.recv() {
+        // Drain all pending events (non-blocking).
+        while let Ok(event) = event_receiver.try_recv() {
             match event {
                 SocketEvent::Packet(packet) => {
                     let addr = packet.addr();
 
-                    // 1. DESERIALIZAR: Convertir bytes a nuestro Enum
                     if let Ok(decoded) = postcard::from_bytes::<GamePacket>(packet.payload()) {
                         match decoded {
                             GamePacket::JoinRequest => {
                                 let id = next_id;
-                                players.insert(addr, id);
+                                addrs.insert(addr, id);
                                 next_id += 1;
+
+                                world.spawn(id);
 
                                 let response = GamePacket::JoinResponse { assigned_id: id };
                                 let bytes = postcard::to_allocvec(&response).unwrap();
-
-                                packet_sender
-                                    .send(Packet::reliable_ordered(addr, bytes, None))
-                                    .unwrap();
-                                println!("Jugador {} unido desde {}", id, addr);
+                                let _ =
+                                    packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
+                                println!("Player {} joined from {}", id, addr);
                             }
-                            GamePacket::PlayerPos {
+                            GamePacket::PlayerInput {
                                 id,
-                                x,
-                                y,
-                                dir,
                                 level_x,
                                 level_y,
+                                move_left,
+                                move_right,
+                                jump,
+                                shoot,
                             } => {
-                                for &player_addr in players.keys() {
-                                    if player_addr != addr {
-                                        let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
-                                            id,
-                                            x,
-                                            y,
-                                            dir,
-                                            level_x,
-                                            level_y,
-                                        })
-                                        .unwrap();
-                                        packet_sender
-                                            .send(Packet::unreliable(player_addr, bytes))
-                                            .unwrap();
-                                    }
+                                // Resolve the id from the transport map (do not trust
+                                // the packet id for state lookup).
+                                let resolved = addrs.get(&addr).copied();
+                                if resolved != Some(id) {
+                                    // Mismatched id — ignore.
+                                    continue;
                                 }
-                            }
-                            GamePacket::Action { id, kind, dir } => {
-                                if kind == "shoot" {
-                                    println!("Jugador {} disparó en dirección {}", id, dir);
 
-                                    for (&player_addr, &player_id) in players.iter() {
-                                        if player_id != id {
-                                            let bytes =
-                                                postcard::to_allocvec(&GamePacket::Action {
-                                                    id,
-                                                    kind: kind.clone(),
-                                                    dir,
-                                                })
-                                                .unwrap();
-                                            packet_sender
-                                                .send(Packet::reliable_ordered(
-                                                    player_addr,
-                                                    bytes,
-                                                    None,
-                                                ))
-                                                .unwrap();
-                                        }
-                                    }
-                                }
+                                world.apply_input(
+                                    id,
+                                    level_x,
+                                    level_y,
+                                    game::entities::player::PlayerInput {
+                                        move_left,
+                                        move_right,
+                                        jump,
+                                        shoot,
+                                    },
+                                );
                             }
                             GamePacket::Leave { id } => {
-                                println!("Jugador {} solicitó salir voluntariamente", id);
-                                players.remove(&addr); // Limpiamos nuestro registro
-
-                                broadcast_leave(&players, &packet_sender, id);
+                                println!("Player {} left voluntarily", id);
+                                addrs.remove(&addr);
+                                world.remove(id);
+                                broadcast_leave(&addrs, &packet_sender, id);
                             }
                             GamePacket::Hit { entity_id: id } => {
-                                println!("Jugador {} ha muerto", id);
+                                println!("Player {} died", id);
 
-                                // Retransmitimos a todos para que actualicen sus listas
-                                for (&player_addr, &player_id) in players.iter() {
+                                for (&player_addr, &player_id) in addrs.iter() {
                                     if player_id != id {
                                         let bytes = postcard::to_allocvec(&GamePacket::Hit {
                                             entity_id: id,
                                         })
                                         .unwrap();
-                                        packet_sender
-                                            .send(Packet::reliable_ordered(
-                                                player_addr,
-                                                bytes,
-                                                None,
-                                            ))
-                                            .unwrap();
+                                        let _ = packet_sender.send(Packet::reliable_ordered(
+                                            player_addr,
+                                            bytes,
+                                            None,
+                                        ));
                                     }
                                 }
                             }
+                            // Client-sent PlayerPos and Action are no longer
+                            // accepted — the server is authoritative.
+                            GamePacket::PlayerPos { .. } | GamePacket::Action { .. } => {}
                             _ => {}
                         }
                     }
                 }
                 SocketEvent::Timeout(addr) => {
-                    if let Some(id) = players.remove(&addr) {
-                        println!("Jugador {} desconectado", id);
-                        broadcast_leave(&players, &packet_sender, id);
+                    if let Some(id) = addrs.remove(&addr) {
+                        println!("Player {} disconnected", id);
+                        world.remove(id);
+                        broadcast_leave(&addrs, &packet_sender, id);
                     }
                 }
                 _ => {}
             }
         }
+
+        // Run one authoritative tick when it's time (fixed step, not wall-clock).
+        // Catch up if the event drain stole too much time (rare, but safe).
+        let now = Instant::now();
+        while now >= next_tick {
+            let shots = world.update(tick_dt);
+
+            // Broadcast authoritative PlayerPos to ALL connected players,
+            // INCLUDING the sender (each player needs its own echo so the
+            // client's own-player branch applies the authoritative position).
+            for (&addr, &id) in &addrs {
+                if let Some(player) = world.players().get(&id) {
+                    let (lx, ly) = world.coords().get(&id).copied().unwrap_or((0, 0));
+                    let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
+                        id,
+                        x: player.pos.x,
+                        y: player.pos.y,
+                        dir: player.dir,
+                        level_x: lx,
+                        level_y: ly,
+                    })
+                    .unwrap();
+                    let _ = packet_sender.send(Packet::unreliable(addr, bytes));
+                }
+            }
+
+            // Rebroadcast shoot notifications to the OTHER players only
+            // (the shooter's own client spawns its bullet locally).
+            for &(shooter_id, dir) in &shots {
+                for (&addr, &player_id) in &addrs {
+                    if player_id == shooter_id {
+                        continue; // skip the shooter
+                    }
+                    let bytes = postcard::to_allocvec(&GamePacket::Action {
+                        id: shooter_id,
+                        kind: "shoot".to_string(),
+                        dir,
+                    })
+                    .unwrap();
+                    let _ = packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
+                }
+            }
+
+            next_tick += tick_interval;
+        }
+
+        // Idle a few ms so we don't busy-spin.
+        let remaining = next_tick
+            .checked_duration_since(Instant::now())
+            .unwrap_or_default();
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(5)));
     }
 }
 
-fn broadcast_leave(players: &HashMap<SocketAddr, u8>, sender: &Sender<Packet>, dropped_id: u8) {
+fn broadcast_leave(addrs: &HashMap<SocketAddr, u8>, sender: &Sender<Packet>, dropped_id: u8) {
     let leave_msg = GamePacket::Leave { id: dropped_id };
-    let bytes = postcard::to_allocvec(&leave_msg).expect("Error serializando Leave");
+    let bytes = postcard::to_allocvec(&leave_msg).expect("Error serializing Leave");
 
-    for &target_addr in players.keys() {
-        // Creamos un paquete para cada destino
+    for &target_addr in addrs.keys() {
         let packet = Packet::reliable_ordered(target_addr, bytes.clone(), None);
         if let Err(e) = sender.send(packet) {
-            eprintln!(
-                "Error enviando broadcast de salida a {}: {}",
-                target_addr, e
-            );
+            eprintln!("Error broadcasting leave to {}: {}", target_addr, e);
         }
     }
 }

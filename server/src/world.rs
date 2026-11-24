@@ -1,12 +1,117 @@
-use std::{collections::HashMap, iter::Map};
+use game::entities::player::{Player, PlayerInput};
+use game::level::Level;
+use game::maps::Map;
+use std::collections::HashMap;
 
-struct ServerWorld {
-    players: HashMap<u64, PlayerData>,
-    map: Map,
+pub struct ServerWorld {
+    players: HashMap<u8, Player>,
+    pending: HashMap<u8, PlayerInput>,
+    coords: HashMap<u8, (u8, u8)>,
+    levels: Vec<Vec<Level>>,
 }
 
 impl ServerWorld {
-    fn update(&mut self) {}
+    pub fn new() -> Self {
+        let map_data = Map::new();
+
+        let levels: Vec<Vec<Level>> = map_data
+            .grids
+            .into_iter()
+            .zip(map_data.data)
+            .map(|(grid_row, data_row)| {
+                grid_row
+                    .into_iter()
+                    .zip(data_row)
+                    .map(|(grid, data)| Level::new(grid, data))
+                    .collect()
+            })
+            .collect();
+
+        Self {
+            players: HashMap::new(),
+            pending: HashMap::new(),
+            coords: HashMap::new(),
+            levels,
+        }
+    }
+
+    pub fn spawn(&mut self, id: u8) {
+        self.players.insert(id, Player::new(id));
+        self.pending.insert(id, PlayerInput::default());
+        self.coords.insert(id, (0, 0));
+    }
+
+    pub fn remove(&mut self, id: u8) {
+        self.players.remove(&id);
+        self.pending.remove(&id);
+        self.coords.remove(&id);
+    }
+
+    pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput) {
+        // coords: (level_x, level_y) = (column, row)
+        self.coords.insert(id, (x, y));
+
+        let pending = self.pending.entry(id).or_default();
+
+        // Held flags overwrite (latest-wins)
+        pending.move_left = input.move_left;
+        pending.move_right = input.move_right;
+
+        // Edge flags OR-accumulate (latched until consumed by update)
+        pending.jump |= input.jump;
+        pending.shoot |= input.shoot;
+    }
+
+    /// Runs one authoritative tick. Returns `(id, dir)` for every player whose
+    /// `shoot` edge was latched this tick.
+    pub fn update(&mut self, dt: f32) -> Vec<(u8, f32)> {
+        let mut shots = Vec::new();
+
+        for (&id, player) in &mut self.players {
+            let (cx, cy) = self.coords.get(&id).copied().unwrap_or((0, 0));
+
+            // Row-major: levels[row_y][col_x]. Client-trusted coords use `.get()`
+            // fallback so a bogus (255,255) does not index-panic the server.
+            let level = self
+                .levels
+                .get(cy as usize)
+                .and_then(|row| row.get(cx as usize))
+                .unwrap_or(&self.levels[0][0]);
+
+            let pending = self.pending.entry(id).or_default();
+
+            // Build the input for this tick: held flags from the accumulator,
+            // jump from the accumulator, shoot forced false (server never spawns
+            // bullets — D6).
+            let input = PlayerInput {
+                move_left: pending.move_left,
+                move_right: pending.move_right,
+                jump: pending.jump,
+                shoot: false,
+            };
+
+            player.update(dt, level, &input);
+
+            // Clear latched edge flags now that they've been consumed.
+            pending.jump = false;
+
+            // If shoot was latched, record the shot for the rebroadcast (id, dir).
+            if pending.shoot {
+                shots.push((id, player.dir));
+            }
+            pending.shoot = false;
+        }
+
+        shots
+    }
+
+    pub fn players(&self) -> &HashMap<u8, Player> {
+        &self.players
+    }
+
+    pub fn coords(&self) -> &HashMap<u8, (u8, u8)> {
+        &self.coords
+    }
 }
 
 // NOTE (tester, Phase 2b): the tests below are written against the plan's
