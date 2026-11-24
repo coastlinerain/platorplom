@@ -10,39 +10,135 @@ specialized subagents and always follow `AGENTS.md`.
 
 - **Small fix** (typo, one-line bug, trivial refactor): do it yourself in this
   session, with the `## Explain` block required by `AGENTS.md`.
-- **Feature or non-trivial change**: run the pipeline below.
+- **Feature or non-trivial change**: proceed to workflow selection.
 
-## Pipeline (for features)
+## Workflow selection
 
-Launch these subagents in order, waiting for each to finish before the next.
-Pass each one the relevant file paths and context, because subagents start with
+Before launching subagents, analyze the task and choose the best workflow.
+**Present your analysis and recommendation to the owner for validation.**
+Do not proceed until the owner confirms.
+
+### Standard pipeline (spec → plan → review → tester → implementer → review → qa)
+
+Use when: the feature has clear APIs that can be specified and tested before
+implementation. The tester writes RED tests against the planned API signatures,
+then the implementer makes them GREEN. Ideal for new protocol types, pure-logic
+functions, or well-specified game mechanics.
+
+```
+1. spec-designer → docs/specs/<feature>.md
+2. planner       → docs/plans/<feature>.md
+3. reviewer (plan mode) → validate plan
+4. tester        → write failing tests from test cases
+5. implementer   → implement to pass tests, fill Explain notes
+6. reviewer (code mode) → review diff
+7. qa            → advisory pass
+```
+
+### Infrastructure-first pipeline (spec → plan → review → implementer → tester → review → qa)
+
+Use when: the feature requires bootstrapping infrastructure before tests can
+even compile. Examples: test harnesses, trait abstractions, lib/bin splits,
+transport layers. The implementer builds the scaffold first, then the tester
+writes tests against the working harness. The tester still adds value: they
+exercise the API from the outside, challenge the design, and write tests that
+catch bugs the implementer might miss.
+
+```
+1. spec-designer → docs/specs/<feature>.md
+2. planner       → docs/plans/<feature>.md
+3. reviewer (plan mode) → validate plan
+4. implementer   → build infrastructure (harness, traits, scaffolding)
+5. tester        → write tests against the working harness
+6. reviewer (code mode) → review full diff
+7. qa            → advisory pass
+```
+
+### No-tester pipeline (spec → plan → review → implementer → review → qa)
+
+Use when: all tests require a running server + multiple clients (UDP sockets,
+real networking) and cannot be automated. The tester step is skipped and
+verification is manual (smoke test). The plan must explicitly state this.
+
+```
+1. spec-designer → docs/specs/<feature>.md
+2. planner       → docs/plans/<feature>.md
+3. reviewer (plan mode) → validate plan
+4. implementer   → implement, fill Explain notes
+5. reviewer (code mode) → review diff
+6. qa            → advisory pass (includes smoke test verification)
+```
+
+### Single-box pipeline (spec → plan → review → implementer → review)
+
+Use when: the change is small enough to fit in a single implementation box
+but too large or risky to be a "small fix." Fewer handoffs, faster turnaround.
+
+```
+1. spec-designer → docs/specs/<feature>.md
+2. planner       → docs/plans/<feature>.md (1–3 boxes)
+3. reviewer (plan mode) → validate plan
+4. implementer   → implement AND write any tests (all in one step)
+5. reviewer (code mode) → review diff
+```
+
+### When in doubt
+
+Ask the owner. The checklist:
+
+1. Can tests be written before implementation? → Standard pipeline.
+2. Does the feature require infrastructure before tests can compile? → Infrastructure-first.
+3. Do all tests require running server + clients? → No-tester pipeline.
+4. Is it just a few small changes with simple tests? → Single-box pipeline.
+5. Unsure? → Present the options and ask.
+
+## Owner validation gates (mandatory)
+
+**Stop and ask the owner before:**
+
+- Choosing a workflow (present analysis + recommendation)
+- Creating a branch or worktree
+- Pushing to remote
+- Opening a pull request
+- Merging anything
+- Deleting or renaming files that are not explicitly requested
+- Making architectural decisions that affect multiple crates (new traits, crate
+  splits, workspace membership changes)
+- Changing agent configuration (`.opencode/agents/` or `opencode.json`)
+
+The owner must explicitly confirm before you proceed. Use the `question` tool
+with clear options, not open-ended prompts.
+
+**You may proceed without asking for:**
+
+- Reading files, searching code, running grep/glob
+- Running `cargo build`, `cargo test`, `cargo fmt`, `cargo clippy`
+- Launching subagents within a validated workflow
+- Making commits within a validated branch (each commit still needs the
+  `## Explain` block)
+- Updating `docs/progress.md` and `docs/lessons.md` as the final step of a
+  completed phase
+
+## Running the chosen pipeline
+
+Launch subagents in order, waiting for each to finish before the next.
+Pass each one the relevant file paths and context — subagents start with
 fresh context and cannot see this conversation.
 
-1. `spec-designer` — write `docs/specs/<feature>.md`.
-2. `planner` — read the spec, write `docs/plans/<feature>.md` (checkable boxes,
-   public API signatures, test cases).
-3. `reviewer` (plan mode) — verify the plan is complete, correct, and feasible
-   against the spec and the codebase. If it finds real issues, send the plan
-   back to `planner` with concrete feedback.
-4. `tester` — read the plan, write failing tests for its test cases (skip if the
-   plan states there are no tests this phase).
-5. `implementer` — read the plan, implement to pass the tests, fill each box's
-   Explain notes.
-6. `reviewer` (code mode) — review the diff and the filled Explain notes for
-   correctness, regressions, and idiomatic Rust. Pass it the base ref so it can
-   inspect the diff with read-only git.
-7. `qa` — a final advisory pass on process health, Rust learning value, and game
-   quality (see its description). Escalate blocker/major findings to the owner.
+If a stage's output is wrong or incomplete, send it back with concrete
+feedback instead of accepting it silently.
 
-Then report to the user: what changed, where the spec and plan live, and any
-issues the reviewer flagged. If a stage's output is wrong or incomplete, send it
-back with concrete feedback instead of accepting it silently.
+When the pipeline finishes, report to the owner:
+- What changed
+- Where the spec and plan live
+- Any issues flagged by the reviewer or qa
+- Whether the branch is ready for push/PR
 
 ## Always
 
 - English identifiers and docs; conventional commits; `cargo fmt`/`clippy` clean.
 - Work on a branch named `<type>/<spec-slug>` branched from `dev`; commit in
   small steps with the `## Explain` block in each commit body.
-- Push the branch and open a pull request; do NOT merge until the owner
-  validates. Report and wait for validation.
+- Push the branch and open a pull request only after owner validation.
+  Do NOT merge — the owner merges.
 - After the work, update `docs/progress.md` and `docs/lessons.md`.
