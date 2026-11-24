@@ -8,6 +8,7 @@ pub struct ServerWorld {
     pending: HashMap<u8, PlayerInput>,
     coords: HashMap<u8, (u8, u8)>,
     levels: Vec<Vec<Level>>,
+    max_seq: HashMap<u8, u16>,
 }
 
 impl ServerWorld {
@@ -32,6 +33,7 @@ impl ServerWorld {
             pending: HashMap::new(),
             coords: HashMap::new(),
             levels,
+            max_seq: HashMap::new(),
         }
     }
 
@@ -39,15 +41,17 @@ impl ServerWorld {
         self.players.insert(id, Player::new(id));
         self.pending.insert(id, PlayerInput::default());
         self.coords.insert(id, (0, 0));
+        self.max_seq.insert(id, 0);
     }
 
     pub fn remove(&mut self, id: u8) {
         self.players.remove(&id);
         self.pending.remove(&id);
         self.coords.remove(&id);
+        self.max_seq.remove(&id);
     }
 
-    pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput) {
+    pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput, seq: u16) {
         // coords: (level_x, level_y) = (column, row)
         self.coords.insert(id, (x, y));
 
@@ -60,6 +64,12 @@ impl ServerWorld {
         // Edge flags OR-accumulate (latched until consumed by update)
         pending.jump |= input.jump;
         pending.shoot |= input.shoot;
+
+        // Track the highest received sequence number.
+        let current = self.max_seq.entry(id).or_insert(0);
+        if game::is_newer_seq(seq, *current) {
+            *current = seq;
+        }
     }
 
     /// Runs one authoritative tick. Returns `(id, dir)` for every player whose
@@ -111,6 +121,10 @@ impl ServerWorld {
 
     pub fn coords(&self) -> &HashMap<u8, (u8, u8)> {
         &self.coords
+    }
+
+    pub fn max_seq(&self) -> &HashMap<u8, u16> {
+        &self.max_seq
     }
 }
 

@@ -1,4 +1,6 @@
 use crate::network::client::NetworkClient;
+use crate::network::interpolation::RemoteInterp;
+use crate::network::prediction::{self, InputEntry, InputRingBuffer};
 use crate::world::game::World;
 use game::entities::bullet::Bullet;
 use game::entities::nemesis::Nemesis;
@@ -18,22 +20,44 @@ pub fn update_network(world: &mut World) {
 
     // Send: forward inputs to the server each frame (once assigned an id).
     if let Some(id) = world.id {
-        // Build the PlayerInput from macroquad keys (same mapping as before).
-        // Held: Left/Right; Edge: Space (jump), Z (shoot).
+        // --- Sticky edge handling (D6) ---
+        let (jump, jump_sticky) =
+            prediction::advance_sticky(world.jump_sticky, is_key_pressed(KeyCode::Space));
+        let (shoot, shoot_sticky) =
+            prediction::advance_sticky(world.shoot_sticky, is_key_pressed(KeyCode::Z));
+        world.jump_sticky = jump_sticky;
+        world.shoot_sticky = shoot_sticky;
+
+        // --- Sequence number ---
+        world.input_seq = world.input_seq.wrapping_add(1);
+        let seq = world.input_seq;
+
+        let move_left = is_key_down(KeyCode::Left);
+        let move_right = is_key_down(KeyCode::Right);
+
         let input_msg = GamePacket::PlayerInput {
             id,
             level_x: world.current_coords.0 as u8,
             level_y: world.current_coords.1 as u8,
-            move_left: is_key_down(KeyCode::Left),
-            move_right: is_key_down(KeyCode::Right),
-            jump: is_key_pressed(KeyCode::Space),
-            shoot: is_key_pressed(KeyCode::Z),
+            move_left,
+            move_right,
+            jump,
+            shoot,
+            seq,
         };
+
+        // Store for reconciliation replay (shoot is NOT stored — D7).
+        world.input_buffer.push(InputEntry {
+            seq,
+            move_left,
+            move_right,
+            jump,
+        });
+
         let bytes = postcard::to_allocvec(&input_msg).unwrap();
-        let _ = world.network.sender.send(laminar::Packet::reliable_ordered(
+        let _ = world.network.sender.send(laminar::Packet::unreliable(
             world.network.server_addr,
             bytes,
-            None,
         ));
     }
 }
@@ -43,6 +67,12 @@ fn handle_packet(world: &mut World, decoded: GamePacket) {
         GamePacket::JoinResponse { assigned_id } => {
             world.id = Some(assigned_id);
             world.player.id = assigned_id;
+            // Reset ack state for the new session.
+            world.input_seq = u16::MAX;
+            world.last_acked_seq = u16::MAX;
+            world.input_buffer = InputRingBuffer::new();
+            world.jump_sticky = 0;
+            world.shoot_sticky = 0;
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -52,24 +82,39 @@ fn handle_packet(world: &mut World, decoded: GamePacket) {
             dir,
             level_x,
             level_y,
+            last_seq,
         } => {
             if Some(id) == world.id {
-                // Own player — apply authoritative position (dumb-terminal model).
-                world.player.pos = vec2(x, y);
-                world.player.dir = dir;
+                // --- RECONCILIATION for own player ---
+                let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
+                prediction::reconcile(
+                    &mut world.player,
+                    &mut world.input_buffer,
+                    &mut world.last_acked_seq,
+                    x,
+                    y,
+                    dir,
+                    last_seq,
+                    level,
+                );
             } else {
-                // Remote player — mirror as Nemesis.
-                if let Some(nemesis) = world.other_players.get_mut(&id) {
-                    nemesis.pos = vec2(x, y);
-                    nemesis.last_dir = dir;
-                    nemesis.coords = (level_x as usize, level_y as usize);
-                } else {
-                    println!("New player {}", id);
-                    let mut new_nemesis = Nemesis::new(id, vec2(x, y));
-                    new_nemesis.last_dir = dir;
-                    new_nemesis.coords = (level_x as usize, level_y as usize);
-                    world.other_players.insert(id, new_nemesis);
-                }
+                // --- Remote player: push interpolation snapshot ---
+                let nemesis = world.other_players.entry(id).or_insert_with(|| {
+                    let mut n = Nemesis::new(id, vec2(x, y));
+                    n.last_dir = dir;
+                    n.coords = (level_x as usize, level_y as usize);
+                    n
+                });
+                // Update raw pos/dir/coords for non-interpolation fallback.
+                nemesis.pos = vec2(x, y);
+                nemesis.last_dir = dir;
+                nemesis.coords = (level_x as usize, level_y as usize);
+
+                let interp = world
+                    .other_interp
+                    .entry(id)
+                    .or_insert_with(RemoteInterp::new);
+                interp.push(nemesis, x, y, dir);
             }
         }
         GamePacket::Action { id, kind, dir } => {
@@ -94,6 +139,7 @@ fn handle_packet(world: &mut World, decoded: GamePacket) {
         }
         GamePacket::Leave { id } => {
             if let Some(_removed) = world.other_players.remove(&id) {
+                world.other_interp.remove(&id);
                 println!("Player {} left. Removed from world.", id);
             } else {
                 println!(

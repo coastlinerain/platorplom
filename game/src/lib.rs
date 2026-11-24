@@ -11,9 +11,9 @@ pub mod types;
 /// The threshold of 32767 (half the u16 range) correctly distinguishes "newer"
 /// from "far behind due to wraparound."
 ///
-/// This function will be implemented by the implementer (Phase 2c Box 2).
 pub fn is_newer_seq(a: u16, b: u16) -> bool {
-    todo!("implementer: is_newer_seq")
+    let diff = a.wrapping_sub(b);
+    diff > 0 && diff < 32768
 }
 
 #[cfg(test)]

@@ -58,6 +58,7 @@ fn main() {
                                 move_right,
                                 jump,
                                 shoot,
+                                seq,
                             } => {
                                 // Resolve the id from the transport map (do not trust
                                 // the packet id for state lookup).
@@ -77,6 +78,7 @@ fn main() {
                                         jump,
                                         shoot,
                                     },
+                                    seq,
                                 );
                             }
                             GamePacket::Leave { id } => {
@@ -132,6 +134,7 @@ fn main() {
             for (&addr, &id) in &addrs {
                 if let Some(player) = world.players().get(&id) {
                     let (lx, ly) = world.coords().get(&id).copied().unwrap_or((0, 0));
+                    let last_seq = world.max_seq().get(&id).copied().unwrap_or(0);
                     let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
                         id,
                         x: player.pos.x,
@@ -139,6 +142,7 @@ fn main() {
                         dir: player.dir,
                         level_x: lx,
                         level_y: ly,
+                        last_seq,
                     })
                     .unwrap();
                     let _ = packet_sender.send(Packet::unreliable(addr, bytes));

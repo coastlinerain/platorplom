@@ -15,7 +15,9 @@ pub struct RemoteInterp {
 
 impl RemoteInterp {
     pub fn new() -> Self {
-        todo!("implementer: RemoteInterp::new")
+        Self {
+            timestamps: [None, None],
+        }
     }
 
     /// Push a new snapshot into the Nemesis and record its arrival time.
@@ -23,7 +25,11 @@ impl RemoteInterp {
     /// Internally calls `nemesis.push_interp_snapshot(x, y, dir)` and shifts
     /// timestamps to keep the 2 most recent entries in sync.
     pub fn push(&mut self, nemesis: &mut Nemesis, x: f32, y: f32, dir: f32) {
-        todo!("implementer: RemoteInterp::push")
+        nemesis.push_interp_snapshot(x, y, dir);
+
+        let now = Instant::now();
+        self.timestamps[0] = self.timestamps[1];
+        self.timestamps[1] = Some(now);
     }
 
     /// Compute interpolated `(x, y, dir)` from the Nemesis snapshot buffer and
@@ -38,13 +44,58 @@ impl RemoteInterp {
     /// - **Stale guard**: if the newer snapshot's timestamp is >200 ms old,
     ///   snaps to the newer position (treats the remote as disconnected).
     pub fn interpolate(&self, nemesis: &Nemesis) -> Option<(f32, f32, f32)> {
-        todo!("implementer: RemoteInterp::interpolate")
+        self.interpolate_at(nemesis, Instant::now())
     }
 
     /// Same as `interpolate` but accepts an explicit `now` for testability.
     /// `interpolate` delegates to this with `Instant::now()`.
     pub fn interpolate_at(&self, nemesis: &Nemesis, now: Instant) -> Option<(f32, f32, f32)> {
-        todo!("implementer: RemoteInterp::interpolate_at")
+        match (nemesis.interp_snapshots[0], nemesis.interp_snapshots[1]) {
+            (None, None) => None,
+            (Some(pos), None) | (None, Some(pos)) => Some(pos),
+            (Some(older), Some(newer)) => {
+                let (ox, oy, _odir) = older;
+                let (nx, ny, ndir) = newer;
+
+                // Stale guard: if the newer snapshot's timestamp is > 200 ms in
+                // the past, snap to the newest position.
+                if let Some(newer_ts) = self.timestamps[1]
+                    && now
+                        .checked_duration_since(newer_ts)
+                        .is_some_and(|d| d.as_millis() > 200)
+                {
+                    return Some((nx, ny, ndir));
+                }
+
+                // Compute lerp factor t = elapsed / interval, clamped to [0, 1].
+                let elapsed_ms = self
+                    .timestamps
+                    .iter()
+                    .zip(&[older, newer])
+                    .filter_map(|(ts, _pos)| *ts)
+                    .collect::<Vec<_>>();
+                if elapsed_ms.len() < 2 {
+                    return Some((nx, ny, ndir));
+                }
+
+                let interval = elapsed_ms[1]
+                    .checked_duration_since(elapsed_ms[0])
+                    .unwrap_or_default();
+                let elapsed = now
+                    .checked_duration_since(elapsed_ms[0])
+                    .unwrap_or_default();
+
+                let t = if interval.as_secs_f32() > 0.0 {
+                    (elapsed.as_secs_f32() / interval.as_secs_f32()).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+
+                let x = ox + (nx - ox) * t;
+                let y = oy + (ny - oy) * t;
+                Some((x, y, ndir))
+            }
+        }
     }
 }
 
@@ -111,9 +162,6 @@ mod tests {
         // Push snapshot A at t0.
         interp.push(&mut nemesis, 100.0, 100.0, 1.0);
         // Overwrite recorded timestamps for deterministic testing.
-        // The interp module needs a way to set timestamps directly or
-        // we rely on the timestamps being recorded at push time.
-        // For the test, we push and then manually set timestamps.
         interp.timestamps[0] = Some(t0);
 
         let t1 = t0 + Duration::from_millis(100);
@@ -195,7 +243,7 @@ mod tests {
             result.is_some(),
             "even stale, 1 snapshot should return Some"
         );
-        let (x, y, dir) = result.unwrap();
+        let (x, _y, dir) = result.unwrap();
         let epsilon = 0.5;
         assert!((x - 100.0).abs() < epsilon, "expected x ≈ 100.0, got {x}");
         assert_eq!(dir, 1.0);

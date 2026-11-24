@@ -13,8 +13,14 @@ pub struct InputEntry {
 }
 
 impl InputEntry {
+    #[expect(dead_code)]
     pub fn from_game_input(seq: u16, input: &PlayerInput) -> Self {
-        todo!("implementer: InputEntry::from_game_input")
+        Self {
+            seq,
+            move_left: input.move_left,
+            move_right: input.move_right,
+            jump: input.jump,
+        }
     }
 }
 
@@ -31,33 +37,59 @@ pub struct InputRingBuffer {
 
 impl InputRingBuffer {
     pub fn new() -> Self {
-        todo!("implementer: InputRingBuffer::new")
+        Self {
+            entries: std::array::from_fn(|_| None),
+            head: 0,
+            len: 0,
+        }
     }
 
     /// Insert `entry`. If the buffer is full (64 entries), evict the oldest
     /// entry before inserting.
     pub fn push(&mut self, entry: InputEntry) {
-        todo!("implementer: InputRingBuffer::push")
+        if self.len == 64 {
+            // Evict the oldest entry: advance head past it.
+            self.head = (self.head + 1) % 64;
+            self.len -= 1;
+        }
+        let idx = (self.head + self.len) % 64;
+        self.entries[idx] = Some(entry);
+        self.len += 1;
     }
 
     /// Remove every entry whose seq is NOT newer than `last_seq`.
     pub fn drain_acknowledged(&mut self, last_seq: u16) {
-        todo!("implementer: InputRingBuffer::drain_acknowledged")
+        while self.len > 0 {
+            let entry = match self.entries[self.head].as_ref() {
+                Some(e) => e,
+                None => break,
+            };
+            if !game::is_newer_seq(entry.seq, last_seq) {
+                self.entries[self.head] = None;
+                self.head = (self.head + 1) % 64;
+                self.len -= 1;
+            } else {
+                break;
+            }
+        }
     }
 
     /// Iterate remaining entries in FIFO order (oldest → newest).
     pub fn replay_order(&self) -> impl Iterator<Item = &InputEntry> {
-        // Placeholder: the implementer replaces this with a real FIFO iterator.
-        // Returns empty for now — `new()` panics so this is never observed.
-        self.entries.iter().filter_map(|e| e.as_ref())
+        (0..self.len).filter_map(move |i| {
+            let idx = (self.head + i) % 64;
+            self.entries[idx].as_ref()
+        })
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        todo!("implementer: InputRingBuffer::is_empty")
+        self.len == 0
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        todo!("implementer: InputRingBuffer::len")
+        self.len
     }
 }
 
@@ -71,7 +103,10 @@ impl InputRingBuffer {
 /// Returns `(should_send, new_sticky)`.
 /// Produces exactly 3 frames of `true` per press.
 pub fn advance_sticky(sticky: u8, pressed: bool) -> (bool, u8) {
-    todo!("implementer: advance_sticky")
+    let sticky = if pressed { 3 } else { sticky };
+    let flag = sticky > 0;
+    let next = if sticky > 0 { sticky - 1 } else { 0 };
+    (flag, next)
 }
 
 /// Reconcile the player's position against an authoritative server snapshot.
@@ -86,6 +121,7 @@ pub fn advance_sticky(sticky: u8, pressed: bool) -> (bool, u8) {
 ///
 /// The `level` parameter is the collision level for the client's current room
 /// (never the server-reported room — see AC 38).
+#[allow(clippy::too_many_arguments)]
 pub fn reconcile(
     player: &mut game::entities::player::Player,
     buffer: &mut InputRingBuffer,
@@ -96,7 +132,34 @@ pub fn reconcile(
     server_last_seq: u16,
     level: &game::level::Level,
 ) -> u16 {
-    todo!("implementer: reconcile")
+    // 1. Stale check: only process if server_last_seq is newer.
+    if !game::is_newer_seq(server_last_seq, *last_acked_seq) {
+        return *last_acked_seq;
+    }
+
+    // 2. Update last_acked_seq.
+    *last_acked_seq = server_last_seq;
+
+    // 3. Discard acknowledged inputs.
+    buffer.drain_acknowledged(server_last_seq);
+
+    // 4. Rewind to server position/dir.
+    player.pos = glam::Vec2::new(server_x, server_y);
+    player.dir = server_dir;
+
+    // 5. Replay unacknowledged inputs (movement only — shoot: false).
+    let replay_dt = 1.0 / game::config::CLIENT_HZ as f32;
+    for entry in buffer.replay_order() {
+        let replay_input = game::entities::player::PlayerInput {
+            move_left: entry.move_left,
+            move_right: entry.move_right,
+            jump: entry.jump,
+            shoot: false, // D7: never re-spawn bullets during replay
+        };
+        player.update(replay_dt, level, &replay_input);
+    }
+
+    *last_acked_seq
 }
 
 #[cfg(test)]

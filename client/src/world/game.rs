@@ -5,6 +5,8 @@ use crate::world::lib::{
 };
 
 use crate::network::client::NetworkClient;
+use crate::network::interpolation::RemoteInterp;
+use crate::network::prediction::InputRingBuffer;
 use crate::network::world::{send_join_req, update_network};
 use game::entities::bullet::Bullet;
 use game::entities::enemy::Enemy;
@@ -27,6 +29,13 @@ pub struct World {
     pub other_players: HashMap<u8, Nemesis>,
     pub enemy_bullets: Vec<Bullet>,
     pub bullets: Vec<Bullet>, // own bullets (relocated from Player; server-authoritative)
+    // --- prediction fields ---
+    pub input_seq: u16,
+    pub last_acked_seq: u16,
+    pub input_buffer: InputRingBuffer,
+    pub jump_sticky: u8,
+    pub shoot_sticky: u8,
+    pub other_interp: HashMap<u8, RemoteInterp>,
 }
 
 impl fmt::Debug for World {
@@ -72,6 +81,12 @@ impl World {
             other_players: HashMap::new(),
             enemy_bullets: Vec::new(),
             bullets: Vec::new(),
+            input_seq: u16::MAX,
+            last_acked_seq: u16::MAX,
+            input_buffer: InputRingBuffer::new(),
+            jump_sticky: 0,
+            shoot_sticky: 0,
+            other_interp: HashMap::new(),
         }
     }
 
@@ -82,9 +97,14 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
-            // The local player no longer self-simulates — the server is
-            // authoritative.  Own-bullet logic (spawn/update/collide) is
-            // relocated here.
+            // --- CLIENT PREDICTION: simulate local player immediately ---
+            let local_input = game::entities::player::PlayerInput {
+                move_left: is_key_down(KeyCode::Left),
+                move_right: is_key_down(KeyCode::Right),
+                jump: is_key_pressed(KeyCode::Space), // raw edge for local feel
+                shoot: false,                         // bullet spawn is separate
+            };
+            self.player.update(dt, level, &local_input);
 
             // Spawn own bullet from the authoritative dir when Z is pressed.
             if is_key_pressed(KeyCode::Z) {
@@ -132,10 +152,15 @@ impl World {
         let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
         level.draw();
 
-        // Remote players (mirrored via Nemesis).
-        for enemy in self.other_players.values() {
-            if enemy.coords == self.current_coords {
-                enemy.draw();
+        // Remote players: interpolated when available, raw fallback otherwise.
+        for (id, nemesis) in &self.other_players {
+            if nemesis.coords == self.current_coords
+                && let Some(interp) = self.other_interp.get(id)
+                && let Some((ix, iy, idir)) = interp.interpolate(nemesis)
+            {
+                crate::render::draw_nemesis_at(nemesis, ix, iy, idir);
+            } else if nemesis.coords == self.current_coords {
+                nemesis.draw();
             }
         }
 
