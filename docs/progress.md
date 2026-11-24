@@ -10,7 +10,7 @@ Working memory for the project. **Update this at the end of every task.**
 | --- | --- |
 | Phase 0 — Workflow foundation | done |
 | Phase 1 — Hardening | done |
-| Phase 2 — Feature loop | todo |
+| Phase 2 — Feature loop | in progress |
 | Phase 3 — Continuous learning | ongoing |
 
 ## Phase 0 checklist
@@ -37,13 +37,17 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Protocol round-trip tests (postcard)
 - [x] Unit tests for `maps` parsing and `level` collision
 - [x] Remove dead code (`try_move`, `spawn_entities`)
-- [ ] Finalize ADR-001 networking model → netcode hardening
+- [x] Finalize ADR-001 networking model → server-authoritative (Accepted)
+- [x] Phase 2a — extract `game` core crate (ADR-001 step 1)
+- [ ] Phase 2b — server-authoritative movement (server tick loop, inputs)
+- [ ] Phase 2c — client prediction + reconciliation
 
 ## Next actions (top = do first)
 
-1. Finalize ADR-001 networking model → netcode hardening (Phase 2).
-2. Consider client lib/bin split to enable `client/tests/` integration tests.
-3. Consider extracting a `core` library crate for pure game logic.
+1. Phase 2b — server-authoritative movement (server tick loop @ 20 Hz `TICK_HZ`,
+   client sends inputs instead of positions).
+2. Phase 2c — client prediction + reconciliation.
+3. Consider client lib/bin split to enable `client/tests/` integration tests.
 
 ## Blockers / notes
 
@@ -54,3 +58,12 @@ Working memory for the project. **Update this at the end of every task.**
 - Phase 1 QA flagged: `PotionSpawn` currently spawns a green `Enemy` (no `Potion`
   type yet) — latent, but now locked by test; client is a binary crate so tests
   are inline `#[cfg(test)]` (a lib/bin split would enable `client/tests/`).
+- (follow-up) `Potion` is intended to be a collectible entity, not an enemy. The
+  current `PotionSpawn → green Enemy` is a placeholder; a future phase should
+  introduce a real `Potion` collectible and retire `EnemyKind::Potion`.
+- (2b forward note) Enemy RNG is drawn once per frame in `World::update` and
+  passed into `Enemy::update`, which only consumes it when the timer elapses.
+  Behavior is unchanged today, but 2b must NOT replicate a frame-rate-dependent
+  draw count — the server should use its own seedable RNG and draw
+  deterministically (one draw per enemy per decision at the fixed tick), or
+  client/server will desync.

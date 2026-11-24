@@ -1,17 +1,17 @@
 use crate::camera::GameCamera;
-use crate::entities::bullet::Bullet;
-use crate::entities::enemy::Enemy;
-use crate::entities::nemesis::Nemesis;
-use crate::entities::player::Player;
-use crate::level::Level;
-use crate::maps::Map;
+use crate::render::Drawable;
 use crate::world::lib::{
-    check_level_transitions, check_player_death, enemies_from_data, update_enemy_bullets_position,
+    check_level_transitions, check_player_death, update_enemy_bullets_position,
 };
 
 use crate::network::client::NetworkClient;
 use crate::network::world::{send_join_req, update_network};
-use crate::traits::Entity;
+use game::entities::bullet::Bullet;
+use game::entities::enemy::Enemy;
+use game::entities::nemesis::Nemesis;
+use game::entities::player::{Player, PlayerInput};
+use game::level::Level;
+use game::maps::Map;
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
@@ -61,7 +61,7 @@ impl World {
         // Spawn the starting room (0, 0) once on construction. The borrow of
         // `levels[0][0].data` must end before `levels` is moved into the struct
         // literal below.
-        let enemies = enemies_from_data(&levels[0][0].data);
+        let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data);
 
         Self {
             id: None,
@@ -82,10 +82,20 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
-            self.player.update(dt, level);
+            // Build the input from macroquad keys each frame. `move_*` are held
+            // (is_key_down), `jump`/`shoot` are edge-triggered (is_key_pressed).
+            let input = PlayerInput {
+                move_left: is_key_down(KeyCode::Left),
+                move_right: is_key_down(KeyCode::Right),
+                jump: is_key_pressed(KeyCode::Space),
+                shoot: is_key_pressed(KeyCode::Z),
+            };
+
+            self.player.update(dt, level, &input);
 
             for enemy in &mut self.enemies {
-                enemy.update(dt, level);
+                let random = macroquad::rand::gen_range(0, 4);
+                enemy.update(dt, level, random);
             }
 
             for bullet in &mut self.player.bullets {

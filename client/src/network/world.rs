@@ -1,7 +1,7 @@
-use crate::entities::bullet::Bullet;
-use crate::entities::nemesis::Nemesis;
 use crate::network::client::NetworkClient;
 use crate::world::game::World;
+use game::entities::bullet::Bullet;
+use game::entities::nemesis::Nemesis;
 use laminar::SocketEvent;
 use macroquad::prelude::*;
 use protocol::GamePacket;

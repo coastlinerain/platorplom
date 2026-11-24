@@ -1,7 +1,6 @@
-use macroquad::prelude::*;
-
 use crate::{
     config::TILE_SIZE,
+    rect::Rect,
     traits::Colisionable,
     types::{EntityType, TileType},
 };
@@ -27,10 +26,10 @@ impl Level {
     }
 
     pub fn pixel_width(&self) -> f32 {
-        self.width as f32 * crate::config::TILE_SIZE
+        self.width as f32 * TILE_SIZE
     }
     pub fn pixel_height(&self) -> f32 {
-        self.height as f32 * crate::config::TILE_SIZE
+        self.height as f32 * TILE_SIZE
     }
 
     pub fn map_colision<T: Colisionable>(&self, objeto: &T) -> bool {
@@ -84,29 +83,13 @@ impl Level {
         }
         false
     }
-
-    pub fn draw(&self) {
-        for (y, fila) in self.grid.iter().enumerate() {
-            for (x, &tile) in fila.iter().enumerate() {
-                if tile == TileType::Wall {
-                    draw_rectangle(
-                        x as f32 * TILE_SIZE,
-                        y as f32 * TILE_SIZE,
-                        TILE_SIZE - 1.0,
-                        TILE_SIZE - 1.0,
-                        GRAY,
-                    );
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Level;
+    use crate::rect::Rect;
     use crate::types::{EntityType, TileType};
-    use macroquad::prelude::Rect;
 
     fn wall_ring_level() -> Level {
         let grid = vec![

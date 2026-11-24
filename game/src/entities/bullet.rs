@@ -1,7 +1,9 @@
+use glam::Vec2;
+
 use crate::config::BULLET_SPEED;
 use crate::level::Level;
-use crate::traits::{Colisionable, Entity, detect_collision};
-use macroquad::prelude::*;
+use crate::rect::Rect;
+use crate::traits::{Colisionable, detect_collision};
 
 #[derive(Debug)]
 pub struct Bullet {
@@ -17,28 +19,24 @@ impl Colisionable for Bullet {
     }
 }
 
-impl Entity for Bullet {
-    fn update(&mut self, dt: f32, nivel: &Level) {
-        self.pos += self.vel * dt;
-        if nivel.map_colision(self) {
-            self.active = false;
-        }
-    }
-    fn draw(&self) {
-        draw_circle(self.pos.x, self.pos.y, 5.0, YELLOW);
-    }
-}
-
 impl Bullet {
     pub fn new(pos: Vec2, dir_x: f32, id: u8) -> Self {
         Self {
             pos,
-            vel: vec2(dir_x * BULLET_SPEED, 0.0),
+            vel: Vec2::new(dir_x * BULLET_SPEED, 0.0),
             active: true,
             owner_id: id,
         }
     }
+
     pub fn check_collision<T: Colisionable>(&self, target: &T) -> bool {
         detect_collision(self, target)
+    }
+
+    pub fn update(&mut self, dt: f32, nivel: &Level) {
+        self.pos += self.vel * dt;
+        if nivel.map_colision(self) {
+            self.active = false;
+        }
     }
 }

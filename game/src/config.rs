@@ -5,3 +5,4 @@ pub const VELOCIDAD: f32 = 400.0;
 pub const BULLET_SPEED: f32 = 400.0;
 pub const MAP_WIDTH: usize = 20;
 pub const MAP_HEIGHT: usize = 12;
+pub const TICK_HZ: u32 = 20;

@@ -39,6 +39,16 @@ run read-only verification commands (`cargo build`/`test`/`clippy`, `cargo fmt
 --check`, and read-only git) to confirm the quality gates yourself. Never run
 mutating commands (bare `cargo fmt`, `git commit`/`push`, `rm`).
 
+**Scope of your shell access (do NOT attempt anything else).** Exactly:
+- `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt --check` (with
+  `--workspace`/`-p <crate>`/`--all-targets` as needed) — gate verification only.
+- read-only git: `git log`, `git status`, `git diff`, `git show`.
+
+Do not run `echo`, `ls`, `cat`, `which`, `cargo build --version`, or any other
+shell command — they are outside your scope and your permission will reject
+them. Read files with your read tool; confirm gates only with the `cargo`
+commands above.
+
 ## Dimensions to review
 
 1. **Workflow / process health.** Was the spec → plan → plan-review → test-first →

@@ -20,7 +20,7 @@ impl From<u8> for TileType {
             1 => TileType::Wall,
             2 => TileType::EnemySpawn,
             3 => TileType::BossSpawn,
-            _ => TileType::Empty, // El 0 y cualquier otro caen aquí
+            _ => TileType::Empty, // 0 and anything else fall through here
         }
     }
 }
@@ -31,7 +31,7 @@ impl From<u8> for EntityType {
             1 => EntityType::EnemySpawn,
             2 => EntityType::BossSpawn,
             3 => EntityType::PotionSpawn,
-            _ => EntityType::Empty, // El 0 y cualquier otro caen aquí
+            _ => EntityType::Empty, // 0 and anything else fall through here
         }
     }
 }
