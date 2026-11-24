@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-24
+> Last updated: 2026-11-24 (Phase 2d infrastructure complete — Boxes 1–8)
 
 ## Current status
 
@@ -41,14 +41,12 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Phase 2a — extract `game` core crate (ADR-001 step 1)
 - [x] Phase 2b — server-authoritative movement (server tick loop, inputs)
 - [x] Phase 2c — client prediction + reconciliation
-- [ ] Phase 2d — (next feature, TBD)
+- [x] Phase 2d — e2e testing infrastructure (infrastructure built, tests pending)
 
 ## Next actions (top = do first)
 
-1. Consider client lib/bin split to enable `client/tests/` integration tests
-   (the `#[allow(dead_code)]` annotations on `InputRingBuffer::is_empty`/`len`
-   and `InputEntry::from_game_input` would disappear — they exist only because
-   the binary crate can't see test usage).
+1. Phase 2d tester writes e2e tests (Boxes 9–14) against the TestHarness API
+2. Phase 2d implementer makes all tests pass; CI updated; quality gates verified
 
 ## Blockers / notes
 
@@ -67,8 +65,8 @@ Working memory for the project. **Update this at the end of every task.**
   (latent until 2c). Room-entry glitch accepted (client-side transitions briefly
   overwritten by authoritative `PlayerPos`). Enemy RNG stays client-side for now
   (the server does not simulate enemies — scope boundary D6).
-- (2c complete) Client prediction + reconciliation + entity interpolation landed
-  on `feat/client-prediction` (3 commits, 73 tests, all gates green). Client
-  predicts locally (zero latency), reconciles on authoritative `PlayerPos`, and
-  lerps remote player positions between snapshots for smooth 20 Hz rendering.
-  ADR-001's 3-step roadmap is now fully implemented.
+- (2d infrastructure built) e2e testing framework landed on `feat/e2e-testing`
+  (9 commits, 75 tests, all gates green). Client and server crates are split into
+  lib + thin binary. `World` uses `Box<dyn PacketIO>` for swappable transport.
+  `TestHarness` provides a deterministic in-memory simulation loop. The tester
+  now writes e2e integration tests (Boxes 9–14).

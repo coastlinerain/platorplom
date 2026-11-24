@@ -228,3 +228,75 @@ Running journal of Rust concepts encountered while building Rustvania.
     on `Nemesis::push_interp_snapshot`'s shift-on-third-push behavior. If
     `push_interp_snapshot` changed its eviction order, the timestamp ring
     would silently desync from the position ring.
+
+## Phase 2d (2026-11-24) — e2e testing infrastructure
+
+### Trait objects (`Box<dyn Trait>`) for swappable transport (2026-11-24)
+
+- **Where**: `client/src/network/packet_io.rs`, `client/src/world/game.rs`, `e2e/src/transport.rs`.
+- **What it is**: `Box<dyn PacketIO>` stores a heap-allocated value whose concrete
+  type is erased behind a trait. At runtime, method calls go through a vtable
+  (dynamic dispatch). The real binary wraps a `RealPacketIO` (laminar); the
+  e2e crate wraps a `LoopbackTransport` (mpsc channels). The `Box` is needed
+  because `dyn Trait` is unsized — it can't live on the stack.
+- **Gotcha / insight**: You don't need the trait in scope (`use PacketIO`) to
+  call trait methods on a `Box<dyn Trait>` — Rust resolves them through the
+  vtable automatically. This is different from generic dispatch where the
+  trait bounds must be in scope.
+
+### Cargo lib/bin split in a single crate (2026-11-24)
+
+- **Where**: `client/Cargo.toml`, `client/src/lib.rs`, `client/src/main.rs`.
+- **What it is**: By adding `[lib]` with a `path` to `src/lib.rs`, the same
+  `Cargo.toml` produces TWO targets — a library (`metroidvania_rust.rlib`) and
+  a binary (`metroidvania-rust`). `main.rs` uses `use metroidvania_rust::...`
+  (the lib name is the Cargo lib target name, not the package name with hyphens).
+  Bin-only modules (`hud`) stay as `mod hud;` in `main.rs`; shared modules
+  (`network`, `world`, `camera`, `render`) go in `lib.rs`.
+- **Gotcha / insight**: The lib target name replaces hyphens with underscores.
+  So `metroidvania-rust` (package) becomes `metroidvania_rust` (lib). The
+  `[lib] name` field controls this; without it, Cargo derives the lib name from
+  the package name by replacing `-` with `_`.
+
+### `std::sync::mpsc` channels for in-process messaging (2026-11-24)
+
+- **Where**: `e2e/src/transport.rs`, `e2e/src/harness.rs`.
+- **What it is**: `mpsc::channel()` creates a `(Sender<T>, Receiver<T>)` pair.
+  The sender can be cloned and shared; the receiver is single-consumer.
+  `rx.try_recv()` returns `Ok(value)` if data is available, `Err(Empty)` if not,
+  and `Err(Disconnected)` if all senders have been dropped. This is the
+  building block for the `LoopbackTransport` — a crossed pair of channels
+  (`(tx_a → rx_b, tx_b → rx_a)`) that simulates a network with zero latency.
+- **Gotcha / insight**: `mpsc::Sender` implements `Clone`, so you can have
+  multiple producers feeding a single consumer. `Receiver` is NOT `Clone` —
+  it's move-only, enforcing the single-consumer guarantee.
+
+### In-memory integration test harness pattern (2026-11-24)
+
+- **Where**: `e2e/src/harness.rs`.
+- **What it is**: The `TestHarness` replaces UDP with mpsc channels: each
+  connected `TestClient` has a `LoopbackTransport` (PacketIO over channels),
+  and the harness simulates the full tick loop — client sends PlayerInput →
+  server processes → server broadcasts PlayerPos/Action → client receives →
+  client runs prediction. All in-process, deterministic, with no timing races.
+  The `tick()` method is a 8-step simulation that mirrors the real server's
+  `main()` loop exactly.
+- **Gotcha / insight**: The borrow checker requires careful scope management
+  when both client physics (needs `&Level`) and room transitions (needs
+  `&mut World`) run in the same tick. Solution: scope-block the level borrow
+  so it drops before `check_level_transitions(&mut client.world)`.
+
+### `#[derive(Default)]` and clippy's `new_without_default` (2026-11-24)
+
+- **Where**: Multiple structs (`GameCamera`, `RemoteInterp`, `InputRingBuffer`,
+  `ServerWorld`, `VirtualClock`, `TestHarness`).
+- **What it is**: Clippy's `new_without_default` lint fires when a type has a
+  `pub fn new() -> Self` but no `impl Default`. The fix is either `#[derive(Default)]`
+  (when all fields have Default impls) or a manual `impl Default for T { fn default()
+  -> Self { Self::new() } }`. Adding `Default` makes the type usable in
+  `HashMap::entry().or_default()`, `Option::unwrap_or_default()`, and other
+  standard library APIs.
+- **Gotcha / insight**: Derive `Default` only works when every field type implements
+  `Default`. `VirtualClock` can't derive it because `Instant` doesn't implement
+  `Default` (it depends on the system clock), so a manual impl calling `Self::new()`
+  is the fix.
