@@ -84,12 +84,27 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 let coords_match = level_x as usize == world.current_coords.0
                     && level_y as usize == world.current_coords.1;
                 if coords_match {
-                    let level =
-                        &world.levels_matrix[world.current_coords.1][world.current_coords.0];
-                    let in_bounds =
-                        x >= 0.0 && y >= 0.0 && x < level.pixel_width() && y < level.pixel_height();
-                    let not_in_wall =
-                        in_bounds && !level.colision(x, y, world.player.w, world.player.h);
+                    // Bounds-guard: a bogus (99,99) coords echoed from the server
+                    // must not index-panic levels_matrix.  Only reconcile when
+                    // the client's current room is valid for its own matrix.
+                    let maybe_level = world
+                        .levels_matrix
+                        .get(world.current_coords.1)
+                        .and_then(|row| row.get(world.current_coords.0));
+                    let Some(level) = maybe_level else {
+                        // Coords out of range — skip reconciliation this frame.
+                        return;
+                    };
+                    // Use solid_in_rect (handles OOB gracefully, as non-solid)
+                    // instead of colision (treats OOB as solid) so that
+                    // reconciliation works at room edges where the player rect
+                    // extends beyond the level boundary.
+                    let not_in_wall = !level.solid_in_rect(game::rect::Rect::new(
+                        x,
+                        y,
+                        world.player.w,
+                        world.player.h,
+                    ));
                     if not_in_wall {
                         prediction::reconcile(
                             &mut world.player,

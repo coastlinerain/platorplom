@@ -1,4 +1,5 @@
 use game::config::TICK_HZ;
+use game::entities::bullet::Bullet;
 use game::entities::player::PlayerInput;
 use game::maps::Map;
 use metroidvania_rust::network::prediction;
@@ -65,6 +66,10 @@ pub struct TestHarness {
     pub last_shots: Vec<(u8, f32)>,
     pub last_broadcasts: Vec<(ClientHandle, u8, f32, f32)>,
     pub last_actions: Vec<(ClientHandle, String, f32)>,
+    /// Cumulative shot count per player (incremented each tick from
+    /// server.world.update's return value).  Used by server_bullet_count
+    /// because the server never stores Bullet objects (D6).
+    pub total_shots: std::collections::HashMap<u8, usize>,
 }
 
 impl TestHarness {
@@ -80,6 +85,7 @@ impl TestHarness {
             last_shots: Vec::new(),
             last_broadcasts: Vec::new(),
             last_actions: Vec::new(),
+            total_shots: std::collections::HashMap::new(),
         }
     }
 
@@ -219,7 +225,12 @@ impl TestHarness {
         }
 
         // Step 4: Server update.
-        self.last_shots = self.server.update(tick_dt);
+        let tick_shots = self.server.update(tick_dt);
+        // Accumulate shot counts (server never stores Bullet objects — D6).
+        for &(pid, dir) in &tick_shots {
+            *self.total_shots.entry(pid).or_insert(0) += 1;
+            self.last_shots.push((pid, dir));
+        }
 
         // Step 5: Broadcast PlayerPos to ALL clients.
         self.last_broadcasts.clear();
@@ -275,38 +286,63 @@ impl TestHarness {
             }
         }
 
-        // Step 7: Each client drains server→client channel and runs local prediction.
+        // Step 7: Each client drains server→client channel, runs local
+        // prediction, and cleans up bullets/enemies.
+        // Order: reconcile → predict → transitions (matches plan spec).
         for client in &mut self.clients {
+            // --- 7a: receive server packets (reconciliation) ---
             while let Some(packet) = client.world.network.try_recv() {
                 handle_packet(&mut client.world, packet);
             }
 
+            // --- 7b: local prediction ---
             let coords = client.world.current_coords;
             {
-                let level = &client.world.levels_matrix[coords.1][coords.0];
+                let maybe_level = client
+                    .world
+                    .levels_matrix
+                    .get(coords.1)
+                    .and_then(|row| row.get(coords.0));
+                if let Some(level) = maybe_level {
+                    let local_input = PlayerInput {
+                        move_left: client.world.move_left,
+                        move_right: client.world.move_right,
+                        jump: client.world.pressed_jump,
+                        shoot: false,
+                    };
 
-                let local_input = PlayerInput {
-                    move_left: client.world.move_left,
-                    move_right: client.world.move_right,
-                    jump: client.world.pressed_jump,
-                    shoot: false,
-                };
+                    client.world.player.update(tick_dt, level, &local_input);
 
-                client.world.player.update(tick_dt, level, &local_input);
+                    // Spawn own bullet when pressed_shoot is true (mirrors World::update).
+                    if client.world.pressed_shoot {
+                        client.world.bullets.push(Bullet::new(
+                            client.world.player.pos
+                                + glam::Vec2::new(
+                                    client.world.player.w / 2.0,
+                                    client.world.player.h / 2.0,
+                                ),
+                            client.world.player.dir,
+                            client.world.player.id,
+                        ));
+                    }
 
-                for bullet in &mut client.world.bullets {
-                    bullet.update(tick_dt, level);
+                    for bullet in &mut client.world.bullets {
+                        bullet.update(tick_dt, level);
+                    }
+                    for bullet in &mut client.world.enemy_bullets {
+                        bullet.update(tick_dt, level);
+                    }
+                    for enemy in &mut client.world.enemies {
+                        enemy.update(tick_dt, level, 0);
+                    }
                 }
-                for bullet in &mut client.world.enemy_bullets {
-                    bullet.update(tick_dt, level);
-                }
-                for enemy in &mut client.world.enemies {
-                    enemy.update(tick_dt, level, 0);
-                }
+                // else: bogus coords — skip prediction.
             }
 
+            // --- 7c: room transitions ---
             check_level_transitions(&mut client.world);
 
+            // --- 7d: cleanup ---
             client.world.bullets.retain(|b| b.active);
             client.world.enemy_bullets.retain(|b| b.active);
             client.world.enemies.retain(|e| e.alive);
@@ -414,11 +450,7 @@ impl TestHarness {
 
     pub fn server_bullet_count(&self, handle: ClientHandle) -> usize {
         let player_id = self.player_id_for(handle);
-        if let Some(player) = self.server.players().get(&player_id) {
-            player.bullets.len()
-        } else {
-            0
-        }
+        self.total_shots.get(&player_id).copied().unwrap_or(0)
     }
 
     pub fn client_bullet_count(&self, handle: ClientHandle) -> usize {

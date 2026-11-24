@@ -57,8 +57,15 @@ fn load_current_level(world: &mut World) {
 }
 pub fn check_level_transitions(world: &mut World) {
     let (cx, cy) = world.current_coords;
-    let level_w = world.levels_matrix[cy][cx].pixel_width();
-    let level_h = world.levels_matrix[cy][cx].pixel_height();
+
+    // Bounds-guard: skip when coords are outside the levels matrix.
+    let maybe_level = world.levels_matrix.get(cy).and_then(|row| row.get(cx));
+    let Some(level) = maybe_level else {
+        return;
+    };
+
+    let level_w = level.pixel_width();
+    let level_h = level.pixel_height();
     let p = &mut world.player;
 
     let mut changed = false;
