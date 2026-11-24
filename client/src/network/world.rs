@@ -1,21 +1,15 @@
-use crate::network::client::NetworkClient;
 use crate::network::interpolation::RemoteInterp;
+use crate::network::packet_io::PacketIO;
 use crate::network::prediction::{self, InputEntry, InputRingBuffer};
 use crate::world::game::World;
 use game::entities::bullet::Bullet;
 use game::entities::nemesis::Nemesis;
-use laminar::SocketEvent;
-use macroquad::prelude::*;
 use protocol::GamePacket;
 
 pub fn update_network(world: &mut World) {
     // Receive: drain all pending packets from the server.
-    while let Ok(event) = world.network.receiver.try_recv() {
-        if let SocketEvent::Packet(packet) = event
-            && let Ok(decoded) = postcard::from_bytes::<GamePacket>(packet.payload())
-        {
-            handle_packet(world, decoded);
-        }
+    while let Some(decoded) = world.network.try_recv() {
+        handle_packet(world, decoded);
     }
 
     // Send: forward inputs to the server each frame (once assigned an id).
@@ -33,8 +27,8 @@ pub fn update_network(world: &mut World) {
         world.input_seq = world.input_seq.wrapping_add(1);
         let seq = world.input_seq;
 
-        let move_left = is_key_down(KeyCode::Left);
-        let move_right = is_key_down(KeyCode::Right);
+        let move_left = world.move_left;
+        let move_right = world.move_right;
 
         let input_msg = GamePacket::PlayerInput {
             id,
@@ -55,11 +49,7 @@ pub fn update_network(world: &mut World) {
             jump,
         });
 
-        let bytes = postcard::to_allocvec(&input_msg).unwrap();
-        let _ = world.network.sender.send(laminar::Packet::unreliable(
-            world.network.server_addr,
-            bytes,
-        ));
+        world.network.send(input_msg);
     }
 }
 
@@ -120,13 +110,13 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             } else {
                 // --- Remote player: push interpolation snapshot ---
                 let nemesis = world.other_players.entry(id).or_insert_with(|| {
-                    let mut n = Nemesis::new(id, vec2(x, y));
+                    let mut n = Nemesis::new(id, glam::Vec2::new(x, y));
                     n.last_dir = dir;
                     n.coords = (level_x as usize, level_y as usize);
                     n
                 });
                 // Update raw pos/dir/coords for non-interpolation fallback.
-                nemesis.pos = vec2(x, y);
+                nemesis.pos = glam::Vec2::new(x, y);
                 nemesis.last_dir = dir;
                 nemesis.coords = (level_x as usize, level_y as usize);
 
@@ -143,7 +133,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                     println!("Player {} shot from {:?}", id, enemy.pos);
 
                     let spawn_center =
-                        vec2(enemy.pos.x + (enemy.w / 2.0), enemy.pos.y + (enemy.h / 2.0));
+                        glam::Vec2::new(enemy.pos.x + (enemy.w / 2.0), enemy.pos.y + (enemy.h / 2.0));
 
                     if enemy.coords == world.current_coords {
                         println!("SAME room");
@@ -172,13 +162,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
     }
 }
 
-pub fn send_join_req(network: &NetworkClient) {
+pub fn send_join_req(network: &mut dyn PacketIO) {
     let join_msg = GamePacket::JoinRequest;
-    let bytes = postcard::to_allocvec(&join_msg).unwrap();
-
-    let _ = network.sender.send(laminar::Packet::reliable_ordered(
-        network.server_addr,
-        bytes,
-        None,
-    ));
+    network.send(join_msg);
 }

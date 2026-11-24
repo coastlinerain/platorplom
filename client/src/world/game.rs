@@ -1,10 +1,10 @@
 use crate::camera::GameCamera;
+use crate::network::packet_io::PacketIO;
 use crate::render::Drawable;
 use crate::world::lib::{
     check_level_transitions, check_player_death, update_enemy_bullets_position,
 };
 
-use crate::network::client::NetworkClient;
 use crate::network::interpolation::RemoteInterp;
 use crate::network::prediction::InputRingBuffer;
 use crate::network::world::{send_join_req, update_network};
@@ -25,7 +25,7 @@ pub struct World {
     pub levels_matrix: Vec<Vec<Level>>,
     pub current_coords: (usize, usize),
     pub camera: GameCamera,
-    pub network: crate::network::client::NetworkClient,
+    pub network: Box<dyn PacketIO>,
     pub other_players: HashMap<u8, Nemesis>,
     pub enemy_bullets: Vec<Bullet>,
     pub bullets: Vec<Bullet>, // own bullets (relocated from Player; server-authoritative)
@@ -39,6 +39,9 @@ pub struct World {
     // Per-frame edge key state (consumed once in update, read by update_network).
     pub pressed_jump: bool,
     pub pressed_shoot: bool,
+    // Programmatic input injection (set by World::update in binary or by TestClient in e2e).
+    pub move_left: bool,
+    pub move_right: bool,
 }
 
 impl fmt::Debug for World {
@@ -55,8 +58,8 @@ impl fmt::Debug for World {
 }
 
 impl World {
-    pub fn new(matrix_data: Map, network: NetworkClient) -> Self {
-        send_join_req(&network);
+    pub fn new(matrix_data: Map, mut network: Box<dyn PacketIO>) -> Self {
+        send_join_req(&mut *network);
 
         let levels: Vec<Vec<Level>> = matrix_data
             .grids
@@ -92,6 +95,8 @@ impl World {
             other_interp: HashMap::new(),
             pressed_jump: false,
             pressed_shoot: false,
+            move_left: false,
+            move_right: false,
         }
     }
 
@@ -106,10 +111,14 @@ impl World {
             let pressed_jump = is_key_pressed(KeyCode::Space);
             let pressed_shoot = is_key_pressed(KeyCode::Z);
 
+            // Sample held keys — stored on World so update_network can read them.
+            self.move_left = is_key_down(KeyCode::Left);
+            self.move_right = is_key_down(KeyCode::Right);
+
             // --- CLIENT PREDICTION: simulate local player immediately ---
             let local_input = game::entities::player::PlayerInput {
-                move_left: is_key_down(KeyCode::Left),
-                move_right: is_key_down(KeyCode::Right),
+                move_left: self.move_left,
+                move_right: self.move_right,
                 jump: pressed_jump,
                 shoot: false, // bullet spawn is separate
             };

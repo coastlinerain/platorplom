@@ -1,6 +1,5 @@
 use crate::world::game::World;
 use game::entities::enemy::enemies_from_data;
-use macroquad::prelude::*;
 use protocol::GamePacket;
 
 pub fn update_enemy_bullets_position(world: &mut World, dt: f32) {
@@ -33,19 +32,14 @@ pub fn check_player_death(world: &mut World) {
 }
 fn handle_death(world: &mut World) {
     if let Some(my_id) = world.id {
-        let death_msg = GamePacket::Hit { entity_id: my_id }; // O GamePacket::Death
-        let bytes = postcard::to_allocvec(&death_msg).unwrap();
-
-        let _ = world.network.sender.send(laminar::Packet::reliable_ordered(
-            world.network.server_addr,
-            bytes,
-            None,
-        ));
+        world.network.send(GamePacket::Hit {
+            entity_id: my_id,
+        });
     }
 
     println!("You died! Returning to start...");
     world.current_coords = (0, 0);
-    world.player.pos = vec2(100.0, 100.0);
+    world.player.pos = glam::Vec2::new(100.0, 100.0);
     load_current_level(world);
 }
 

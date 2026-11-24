@@ -26,7 +26,7 @@ impl PacketIO for RealPacketIO {
         let bytes = postcard::to_allocvec(&packet).unwrap();
         let pkt = match &packet {
             protocol::GamePacket::JoinRequest | protocol::GamePacket::Hit { .. } => {
-                laminar::Packet::reliable_ordered(self.server_addr, bytes)
+                laminar::Packet::reliable_ordered(self.server_addr, bytes, None)
             }
             _ => laminar::Packet::unreliable(self.server_addr, bytes),
         };
