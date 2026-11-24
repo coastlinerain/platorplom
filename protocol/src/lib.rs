@@ -11,6 +11,7 @@ pub enum GamePacket {
         dir: f32,
         level_x: u8,
         level_y: u8,
+        last_seq: u16,
     },
     Action {
         id: u8,
@@ -31,5 +32,6 @@ pub enum GamePacket {
         move_right: bool,
         jump: bool,
         shoot: bool,
+        seq: u16,
     },
 }

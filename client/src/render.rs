@@ -78,6 +78,19 @@ impl Drawable for Nemesis {
     }
 }
 
+/// Draw a Nemesis at an interpolated position instead of its raw `.pos`.
+/// Called from `World::draw` when `RemoteInterp::interpolate` returns a value.
+pub fn draw_nemesis_at(nemesis: &Nemesis, x: f32, y: f32, dir: f32) {
+    draw_rectangle(x, y, nemesis.w, nemesis.h, ORANGE);
+
+    // Draw a small indicator of which way it is facing.
+    let eye_x = if dir > 0.0 { x + 20.0 } else { x + 5.0 };
+    draw_rectangle(eye_x, y + 10.0, 5.0, 5.0, WHITE);
+
+    // Draw the player's ID above its head.
+    draw_text(format!("P: {}", nemesis.id), x, y - 10.0, 15.0, WHITE);
+}
+
 impl Drawable for Bullet {
     fn draw(&self) {
         draw_circle(self.pos.x, self.pos.y, 5.0, YELLOW);

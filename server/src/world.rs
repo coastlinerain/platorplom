@@ -8,6 +8,7 @@ pub struct ServerWorld {
     pending: HashMap<u8, PlayerInput>,
     coords: HashMap<u8, (u8, u8)>,
     levels: Vec<Vec<Level>>,
+    max_seq: HashMap<u8, u16>,
 }
 
 impl ServerWorld {
@@ -32,6 +33,7 @@ impl ServerWorld {
             pending: HashMap::new(),
             coords: HashMap::new(),
             levels,
+            max_seq: HashMap::new(),
         }
     }
 
@@ -39,15 +41,17 @@ impl ServerWorld {
         self.players.insert(id, Player::new(id));
         self.pending.insert(id, PlayerInput::default());
         self.coords.insert(id, (0, 0));
+        self.max_seq.insert(id, 0);
     }
 
     pub fn remove(&mut self, id: u8) {
         self.players.remove(&id);
         self.pending.remove(&id);
         self.coords.remove(&id);
+        self.max_seq.remove(&id);
     }
 
-    pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput) {
+    pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput, seq: u16) {
         // coords: (level_x, level_y) = (column, row)
         self.coords.insert(id, (x, y));
 
@@ -60,6 +64,12 @@ impl ServerWorld {
         // Edge flags OR-accumulate (latched until consumed by update)
         pending.jump |= input.jump;
         pending.shoot |= input.shoot;
+
+        // Track the highest received sequence number.
+        let current = self.max_seq.entry(id).or_insert(0);
+        if game::is_newer_seq(seq, *current) {
+            *current = seq;
+        }
     }
 
     /// Runs one authoritative tick. Returns `(id, dir)` for every player whose
@@ -112,6 +122,10 @@ impl ServerWorld {
     pub fn coords(&self) -> &HashMap<u8, (u8, u8)> {
         &self.coords
     }
+
+    pub fn max_seq(&self) -> &HashMap<u8, u16> {
+        &self.max_seq
+    }
 }
 
 // NOTE (tester, Phase 2b): the tests below are written against the plan's
@@ -142,6 +156,7 @@ mod tests {
                 move_left: true,
                 ..Default::default()
             },
+            0,
         );
         world.apply_input(
             0,
@@ -151,6 +166,7 @@ mod tests {
                 move_right: true,
                 ..Default::default()
             },
+            0,
         );
 
         // Held flags overwrite: the latest input (move_right) wins.
@@ -175,6 +191,7 @@ mod tests {
                 shoot: true,
                 ..Default::default()
             },
+            0,
         );
         world.apply_input(
             0,
@@ -184,6 +201,7 @@ mod tests {
                 shoot: true,
                 ..Default::default()
             },
+            0,
         );
 
         // Two shoot edges OR-latch into a single shot: exactly one is consumed.
@@ -214,6 +232,7 @@ mod tests {
                 shoot: true,
                 ..Default::default()
             },
+            0,
         );
 
         // Tick 2: the latched edge fires instead of being dropped.
@@ -233,6 +252,7 @@ mod tests {
                 move_right: true,
                 ..Default::default()
             },
+            0,
         );
 
         world.update(tick_dt());
@@ -257,6 +277,7 @@ mod tests {
                 jump: true,
                 ..Default::default()
             },
+            0,
         );
 
         world.update(tick_dt());
@@ -280,10 +301,55 @@ mod tests {
                 move_right: true,
                 ..Default::default()
             },
+            0,
         );
 
         world.update(tick_dt());
 
         assert!(world.players()[&0].pos.x > 100.0);
+    }
+
+    // --- max_seq tests (Phase 2c) ---
+
+    /// AC 28 — max_seq is updated on apply_input with wrapping-aware comparison.
+    /// Older seq values are ignored; newer seq values overwrite.
+    #[test]
+    fn max_seq_updated_on_apply_input() {
+        let mut world = ServerWorld::new();
+        world.spawn(0);
+
+        // Initial state: max_seq is 0 for a newly-spawned player.
+        assert_eq!(world.max_seq().get(&0).copied().unwrap_or(0), 0);
+
+        // Apply input with seq 5.
+        world.apply_input(0, 0, 0, PlayerInput::default(), 5);
+        assert_eq!(world.max_seq()[&0], 5);
+
+        // Older seq is ignored.
+        world.apply_input(0, 0, 0, PlayerInput::default(), 3);
+        assert_eq!(world.max_seq()[&0], 5);
+
+        // Newer seq overwrites.
+        world.apply_input(0, 0, 0, PlayerInput::default(), 10);
+        assert_eq!(world.max_seq()[&0], 10);
+    }
+
+    /// AC 29 — max_seq starts at 0 for newly-spawned players.
+    /// The server reports 0 for players who have not sent any inputs yet.
+    #[test]
+    fn playerpos_broadcast_includes_last_seq() {
+        let mut world = ServerWorld::new();
+        world.spawn(0);
+
+        // New player has max_seq == 0.
+        assert_eq!(world.max_seq().get(&0).copied().unwrap_or(0), 0);
+
+        // After applying an input with seq 7, max_seq is updated.
+        world.apply_input(0, 0, 0, PlayerInput::default(), 7);
+        assert_eq!(world.max_seq()[&0], 7);
+
+        // A second player starts at 0.
+        world.spawn(1);
+        assert_eq!(world.max_seq().get(&1).copied().unwrap_or(0), 0);
     }
 }
