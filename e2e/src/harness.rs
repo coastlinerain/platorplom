@@ -37,6 +37,13 @@ impl VirtualClock {
     }
 }
 
+impl Default for VirtualClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Headless client wrapper for a single player.
 pub struct TestClient {
     pub handle: ClientHandle,
     pub world: World,
@@ -184,31 +191,29 @@ impl TestHarness {
         // Step 3: Drain client→server channels, feed server.apply_input.
         for rx in &self.from_clients {
             while let Ok(bytes) = rx.try_recv() {
-                if let Ok(packet) = postcard::from_bytes::<GamePacket>(&bytes) {
-                    if let GamePacket::PlayerInput {
+                if let Ok(GamePacket::PlayerInput {
+                    id,
+                    level_x,
+                    level_y,
+                    move_left,
+                    move_right,
+                    jump,
+                    shoot,
+                    seq,
+                }) = postcard::from_bytes::<GamePacket>(&bytes)
+                {
+                    self.server.apply_input(
                         id,
                         level_x,
                         level_y,
-                        move_left,
-                        move_right,
-                        jump,
-                        shoot,
+                        PlayerInput {
+                            move_left,
+                            move_right,
+                            jump,
+                            shoot,
+                        },
                         seq,
-                    } = packet
-                    {
-                        self.server.apply_input(
-                            id,
-                            level_x,
-                            level_y,
-                            PlayerInput {
-                                move_left,
-                                move_right,
-                                jump,
-                                shoot,
-                            },
-                            seq,
-                        );
-                    }
+                    );
                 }
             }
         }
@@ -223,10 +228,8 @@ impl TestHarness {
                 .players()
                 .iter()
                 .map(|(&pid, p)| {
-                    let (lx, ly) =
-                        self.server.coords().get(&pid).copied().unwrap_or((0, 0));
-                    let last_seq =
-                        self.server.max_seq().get(&pid).copied().unwrap_or(0);
+                    let (lx, ly) = self.server.coords().get(&pid).copied().unwrap_or((0, 0));
+                    let last_seq = self.server.max_seq().get(&pid).copied().unwrap_or(0);
                     (pid, p.pos.x, p.pos.y, p.dir, lx, ly, last_seq)
                 })
                 .collect()
@@ -244,8 +247,7 @@ impl TestHarness {
                     level_y: ly,
                     last_seq,
                 };
-                let bytes =
-                    postcard::to_allocvec(&packet).expect("serialize PlayerPos");
+                let bytes = postcard::to_allocvec(&packet).expect("serialize PlayerPos");
                 let _ = tx.send(bytes);
                 self.last_broadcasts.push((handle, pid, px, py));
             }
@@ -258,17 +260,14 @@ impl TestHarness {
                 if client.player_id == shooter_id {
                     continue;
                 }
-                if let Some(idx) =
-                    self.clients.iter().position(|c| c.handle == client.handle)
-                {
+                if let Some(idx) = self.clients.iter().position(|c| c.handle == client.handle) {
                     let tx = &self.to_clients[idx];
                     let packet = GamePacket::Action {
                         id: shooter_id,
                         kind: "shoot".to_string(),
                         dir,
                     };
-                    let bytes =
-                        postcard::to_allocvec(&packet).expect("serialize Action");
+                    let bytes = postcard::to_allocvec(&packet).expect("serialize Action");
                     let _ = tx.send(bytes);
                     self.last_actions
                         .push((client.handle, "shoot".to_string(), dir));
@@ -284,8 +283,7 @@ impl TestHarness {
 
             let coords = client.world.current_coords;
             {
-                let level =
-                    &client.world.levels_matrix[coords.1][coords.0];
+                let level = &client.world.levels_matrix[coords.1][coords.0];
 
                 let local_input = PlayerInput {
                     move_left: client.world.move_left,
@@ -437,5 +435,11 @@ impl TestHarness {
 
     pub fn clock_now(&self) -> Instant {
         self.clock.now()
+    }
+}
+
+impl Default for TestHarness {
+    fn default() -> Self {
+        Self::new()
     }
 }

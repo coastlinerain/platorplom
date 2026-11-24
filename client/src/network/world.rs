@@ -119,10 +119,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 nemesis.last_dir = dir;
                 nemesis.coords = (level_x as usize, level_y as usize);
 
-                let interp = world
-                    .other_interp
-                    .entry(id)
-                    .or_default();
+                let interp = world.other_interp.entry(id).or_default();
                 interp.push(nemesis, x, y, dir);
             }
         }
@@ -131,8 +128,10 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 if let Some(enemy) = world.other_players.get(&id) {
                     println!("Player {} shot from {:?}", id, enemy.pos);
 
-                    let spawn_center =
-                        glam::Vec2::new(enemy.pos.x + (enemy.w / 2.0), enemy.pos.y + (enemy.h / 2.0));
+                    let spawn_center = glam::Vec2::new(
+                        enemy.pos.x + (enemy.w / 2.0),
+                        enemy.pos.y + (enemy.h / 2.0),
+                    );
 
                     if enemy.coords == world.current_coords {
                         println!("SAME room");

@@ -32,9 +32,7 @@ pub fn check_player_death(world: &mut World) {
 }
 fn handle_death(world: &mut World) {
     if let Some(my_id) = world.id {
-        world.network.send(GamePacket::Hit {
-            entity_id: my_id,
-        });
+        world.network.send(GamePacket::Hit { entity_id: my_id });
     }
 
     println!("You died! Returning to start...");

@@ -132,6 +132,12 @@ impl ServerWorld {
     }
 }
 
+impl Default for ServerWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // NOTE (tester, Phase 2b): the tests below are written against the plan's
 // revived `ServerWorld` public API (`new` / `spawn` / `apply_input` / `update` /
 // `players` / `coords`) plus the private `pending` accumulator. They do NOT

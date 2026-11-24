@@ -34,14 +34,8 @@ pub fn create_loopback_pair() -> (LoopbackTransport, LoopbackTransport) {
     let (tx_a, rx_a) = mpsc::channel();
     let (tx_b, rx_b) = mpsc::channel();
 
-    let client_side = LoopbackTransport {
-        rx: rx_a,
-        tx: tx_b,
-    };
-    let server_side = LoopbackTransport {
-        rx: rx_b,
-        tx: tx_a,
-    };
+    let client_side = LoopbackTransport { rx: rx_a, tx: tx_b };
+    let server_side = LoopbackTransport { rx: rx_b, tx: tx_a };
 
     (client_side, server_side)
 }
