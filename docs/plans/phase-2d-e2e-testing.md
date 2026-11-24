@@ -913,7 +913,7 @@ Explain
 
 ### Box 9 — Group A tests (movement, 7 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests A1–A7 compile and pass. `cargo test -p e2e movement` is green.
 - **Test**: A1–A7 themselves.
 - **Explain**
@@ -926,7 +926,7 @@ Explain
 
 ### Box 10 — Group B tests (room transitions, 9 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests B1–B9 compile and pass. `cargo test -p e2e rooms` is green.
 - **Test**: B1–B9.
 - **Explain**
@@ -939,7 +939,7 @@ Explain
 
 ### Box 11 — Group C tests (multi-player visibility, 7 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests C1–C7 compile and pass. `cargo test -p e2e multiplayer` is green.
 - **Test**: C1–C7.
 - **Explain**
@@ -952,7 +952,7 @@ Explain
 
 ### Box 12 — Group D tests (shoot, 6 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests D1–D6 compile and pass. `cargo test -p e2e shoot` is green.
 - **Test**: D1–D6.
 - **Explain**
@@ -965,7 +965,7 @@ Explain
 
 ### Box 13 — Group E tests (reconciliation jitter, 6 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests E1–E6 compile and pass. `cargo test -p e2e reconciliation` is green.
 - **Test**: E1–E6.
 - **Explain**
@@ -978,7 +978,7 @@ Explain
 
 ### Box 14 — Group F tests (edge cases, 6 tests)
 
-- [ ] done
+- [x] done
 - **Acceptance**: Tests F1–F6 compile and pass. `cargo test -p e2e edge_cases` is green.
 - **Test**: F1–F6.
 - **Explain**
@@ -991,7 +991,7 @@ Explain
 
 ### Box 15 — CI update
 
-- [ ] done
+- [x] done
 - **Acceptance**:
   1. `.github/workflows/ci.yml` is unchanged (`cargo test --workspace` already covers `e2e`).
   2. `cargo test --workspace` passes including all e2e tests.
@@ -1008,7 +1008,7 @@ Explain
 
 ### Box 16 — Quality gates (full workspace)
 
-- [ ] done
+- [x] done
 - **Acceptance**:
   1. `cargo test --workspace` — all existing 73 unit tests + all ~41 e2e tests pass (~114 total).
   2. `cargo clippy --workspace --all-targets -- -D warnings` — zero warnings.

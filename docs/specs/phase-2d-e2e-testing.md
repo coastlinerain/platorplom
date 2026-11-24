@@ -1,6 +1,6 @@
 # Phase 2d — End-to-End Testing Infrastructure
 
-- Status: draft
+- Status: implemented
 - Date: 2026-11-24
 - Branch: `feat/phase-2d-e2e-testing`
 

@@ -45,9 +45,8 @@ Working memory for the project. **Update this at the end of every task.**
 
 ## Next actions (top = do first)
 
-1. Reviewer (code mode) reviews the Phase 2d diff for correctness and regressions
-2. QA reviews process health and game quality
-3. Owner validates and merges to dev
+1. Owner validates and merges `feat/e2e-testing` to dev
+2. Plan Phase 2e — (next feature, TBD: server-side room transitions, bullet cooldown, or player interaction)
 
 ## Blockers / notes
 
