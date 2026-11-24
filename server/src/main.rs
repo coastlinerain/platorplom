@@ -128,15 +128,15 @@ fn main() {
         while now >= next_tick {
             let shots = world.update(tick_dt);
 
-            // Broadcast authoritative PlayerPos to ALL connected players,
-            // INCLUDING the sender (each player needs its own echo so the
-            // client's own-player branch applies the authoritative position).
-            for (&addr, &id) in &addrs {
-                if let Some(player) = world.players().get(&id) {
-                    let (lx, ly) = world.coords().get(&id).copied().unwrap_or((0, 0));
-                    let last_seq = world.max_seq().get(&id).copied().unwrap_or(0);
+            // Broadcast authoritative PlayerPos from EVERY player to EVERY
+            // connected address (nested loop: dest × players). The own-player
+            // echo is included — the client's reconciliation branch depends on it.
+            for &dest_addr in addrs.keys() {
+                for (&player_id, player) in world.players() {
+                    let (lx, ly) = world.coords().get(&player_id).copied().unwrap_or((0, 0));
+                    let last_seq = world.max_seq().get(&player_id).copied().unwrap_or(0);
                     let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
-                        id,
+                        id: player_id,
                         x: player.pos.x,
                         y: player.pos.y,
                         dir: player.dir,
@@ -145,7 +145,7 @@ fn main() {
                         last_seq,
                     })
                     .unwrap();
-                    let _ = packet_sender.send(Packet::unreliable(addr, bytes));
+                    let _ = packet_sender.send(Packet::unreliable(dest_addr, bytes));
                 }
             }
 
