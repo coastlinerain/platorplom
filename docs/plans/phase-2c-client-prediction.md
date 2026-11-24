@@ -1,6 +1,6 @@
 # Phase 2c — Client prediction + reconciliation — Implementation Plan
 
-- Status: draft (reviewed 2026-11-24; see fixes below)
+- Status: implemented (all 11 boxes checked, 73 tests green, 2026-11-24)
 - Spec: `docs/specs/phase-2c-client-prediction.md`
 - Date: 2026-11-24
 - Branch: `feat/client-prediction`

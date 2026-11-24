@@ -24,6 +24,12 @@ impl RemoteInterp {
     ///
     /// Internally calls `nemesis.push_interp_snapshot(x, y, dir)` and shifts
     /// timestamps to keep the 2 most recent entries in sync.
+    ///
+    /// The timestamp shift (`[1] → [0], [1] = now`) mirrors `Nemesis`'s
+    /// shift-on-third-push behavior: after 2 pushes, both structures have the
+    /// same 2-entry ring (older at index 0, newer at index 1). If
+    /// `push_interp_snapshot` ever changes its eviction order, this function
+    /// must be updated to match.
     pub fn push(&mut self, nemesis: &mut Nemesis, x: f32, y: f32, dir: f32) {
         nemesis.push_interp_snapshot(x, y, dir);
 

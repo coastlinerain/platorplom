@@ -40,14 +40,15 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Finalize ADR-001 networking model → server-authoritative (Accepted)
 - [x] Phase 2a — extract `game` core crate (ADR-001 step 1)
 - [x] Phase 2b — server-authoritative movement (server tick loop, inputs)
-- [ ] Phase 2c — client prediction + reconciliation
+- [x] Phase 2c — client prediction + reconciliation
+- [ ] Phase 2d — (next feature, TBD)
 
 ## Next actions (top = do first)
 
-1. Phase 2c — client prediction + reconciliation (interpolate between
-   authoritative snapshots, reconcile local prediction against server state,
-   buffer smoothing to hide 20 Hz tick steps).
-2. Consider client lib/bin split to enable `client/tests/` integration tests.
+1. Consider client lib/bin split to enable `client/tests/` integration tests
+   (the `#[allow(dead_code)]` annotations on `InputRingBuffer::is_empty`/`len`
+   and `InputEntry::from_game_input` would disappear — they exist only because
+   the binary crate can't see test usage).
 
 ## Blockers / notes
 
@@ -66,3 +67,8 @@ Working memory for the project. **Update this at the end of every task.**
   (latent until 2c). Room-entry glitch accepted (client-side transitions briefly
   overwritten by authoritative `PlayerPos`). Enemy RNG stays client-side for now
   (the server does not simulate enemies — scope boundary D6).
+- (2c complete) Client prediction + reconciliation + entity interpolation landed
+  on `feat/client-prediction` (3 commits, 73 tests, all gates green). Client
+  predicts locally (zero latency), reconciles on authoritative `PlayerPos`, and
+  lerps remote player positions between snapshots for smooth 20 Hz rendering.
+  ADR-001's 3-step roadmap is now fully implemented.
