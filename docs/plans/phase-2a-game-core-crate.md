@@ -343,7 +343,7 @@ tests → client split → gates); the group headings below are thematic.
 
 #### Box 1 — Create `game/Cargo.toml`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/Cargo.toml` exists with `[package] name = "game"`,
   `version = "0.1.0"`, `edition = "2024"`, a single `[dependencies]` entry
   `glam = "0.27"`, and `[lints] workspace = true`. It declares **no** `macroquad`,
@@ -351,41 +351,55 @@ tests → client split → gates); the group headings below are thematic.
 - **Test**: `grep -nE "macroquad|postcard|laminar|serde" game/Cargo.toml` returns
   no matches; `grep -n "glam" game/Cargo.toml` shows `glam = "0.27"`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Created the `game` library crate manifest with `glam = "0.27"` as its
+    only dependency and `[lints] workspace = true` to inherit the repo's clippy
+    config.
+  - Why: The server can't link a graphics/input library, so the simulation crate
+    must depend only on a math crate. `glam` was chosen because macroquad already
+    re-exports `glam::Vec2`, making the boundary a same-type hand-off.
+  - Rust concepts: Cargo `[package]`/`[dependencies]`; workspace `[lints]`
+    inheritance.
+  - Watch out: Adding `serde`/`postcard` here would be a layering mistake — the
+    simulation must not know about the wire format.
 
 #### Box 2 — Register `game` in root workspace members
 
-- [ ] done
+- [x] done
 - **Acceptance**: root `Cargo.toml` `[workspace] members` is exactly
   `["server", "client", "protocol", "game"]`; `cargo metadata --no-deps` lists a
   `game` package.
 - **Test**: `grep -n "members" Cargo.toml`; `cargo metadata --no-deps --format-version 1 | grep -o '"name":"game"'`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Added `"game"` to the root `[workspace] members` array.
+  - Why: A workspace member is compiled/tested/linted as part of `cargo
+    <cmd> --workspace` and shares a single `Cargo.lock`, so `game` is now a
+    first-class crate rather than a stray folder.
+  - Rust concepts: Cargo workspaces and `--workspace`-scoped commands.
+  - Watch out: Order of members in the array doesn't matter; what matters is that
+    the path resolves to a crate with a `[package]`.
 
 #### Box 3 — Add `game` dependency to `client` and `server`
 
-- [ ] done
+- [x] done
 - **Acceptance**: both `client/Cargo.toml` and `server/Cargo.toml` declare
   `game = { path = "../game" }` under `[dependencies]`.
 - **Test**: `grep -n 'game = { path = "../game" }' client/Cargo.toml server/Cargo.toml`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Added `game = { path = "../game" }` to both `client` and `server`
+    manifests.
+  - Why: `client` consumes the simulation directly; `server` declares it now but
+    doesn't `use` it until 2b. Declaring early wires the dependency graph so 2b
+    only adds code.
+  - Rust concepts: Cargo path dependencies (`path = "..."`) vs registry deps.
+  - Watch out: The `server`'s `game` dep is currently unused, so `cargo build`
+    emits a benign `unused dependency: game` manifest warning — intentional, not a
+    clippy error. Do not remove it to silence the warning.
 
 ### Group 2 — Simulation moved into `game` (criteria 6–13, 17–18)
 
 #### Box 4 — `game/src/lib.rs` + `config.rs` + `rect.rs`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/lib.rs` declares `pub mod config; pub mod types; pub
   mod maps; pub mod level; pub mod traits; pub mod rect; pub mod entities;`
   (stub/empty files for not-yet-moved modules are acceptable so `cargo build -p
@@ -395,39 +409,55 @@ tests → client split → gates); the group headings below are thematic.
 - **Test**: `cargo build -p game`; `cargo test -p game rect_` (after Box 19's
   `rect_*` tests are written).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Created the crate root (`lib.rs`) declaring the seven public modules,
+    moved the constants into `config.rs` (adding `TICK_HZ: u32 = 20`), and wrote a
+    local `Rect` with a macroquad-compatible strict-`<` `overlaps`.
+  - Why: `Rect` isn't in `glam`, so the simulation needs its own shape type; the
+    strict-`<` semantics must match macroquad's so collision is byte-identical
+    after the move. `TICK_HZ` is a named constant so 2b's 20→60 Hz retune is one
+    line.
+  - Rust concepts: `pub mod`; `#[derive(Clone, Copy, Debug, PartialEq)]`; struct
+    fields.
+  - Watch out: `PartialEq` (not `Eq`) — `f32` fields make `Rect` only partially
+    equal.
 
 #### Box 5 — Move `types.rs`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/types.rs` defines `TileType`/`EntityType` and their
   `From<u8>` impls with unchanged mappings (fallback-to-`Empty`), English comment;
   the two `From<u8>` inline tests live there.
 - **Test**: `cargo test -p game tile_type_from_u8 entity_type_from_u8`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `types.rs` verbatim (with Spanish comments translated to English).
+  - Why: Tile/entity kinds are pure data the server must know to lay out levels;
+    they belong in `game`, not the client.
+  - Rust concepts: `From<u8>` with a fallback (`_ => Empty`); exhaustive-match
+    fallback via a wildcard arm.
+  - Watch out: The fallback-to-`Empty` semantics are deliberate (unknown bytes
+    degrade safely); the round-trip tests don't cover `types` so the inline tests
+    are the only guard.
 
 #### Box 6 — Move `maps.rs`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/maps.rs` defines `Map` + `Map::new` with the same
   `LVL_*_*`/`DATA_*_*` grids and dimensions; its two inline tests live there.
 - **Test**: `cargo test -p game map_new`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `maps.rs` (the `Map` struct plus the hard-coded `LVL_*`/`DATA_*`
+    level grids) into `game`.
+  - Why: The level grids are simulation data — the server needs the same maps to
+    simulate authoritatively; they can't live only in the rendering client.
+  - Rust concepts: Nested `Vec<Vec<Vec<Vec<T>>>>` grid types; `Map::new` building
+    from `LVL_*`/`DATA_*` constants.
+  - Watch out: The grids are hard-coded (no file loader yet); a future phase
+    should read them from a resource. `Map` gained `impl Default` to satisfy the
+    `new_without_default` clippy lint.
 
 #### Box 7 — Move `level.rs` (collision only)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/level.rs` defines `Level` with `new`, `pixel_width`,
   `pixel_height`, `map_colision`, `solid_point`, `colision`, `grounded`,
   `solid_in_rect`, and **no** `draw`; `Rect` is `game::Rect`; its 10 inline tests
@@ -435,40 +465,54 @@ tests → client split → gates); the group headings below are thematic.
 - **Test**: `cargo test -p game solid_in_rect` and `cargo test -p game grounded`
   and `cargo test -p game colision`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved the collision geometry (`solid_point`, `colision`, `grounded`,
+    `solid_in_rect`, `map_colision`) into `game::level`, dropping `draw` and
+    switching `macroquad::Rect` to `game::Rect`.
+  - Why: Collision is the heart of the simulation and must run identically on the
+    server in 2b; rendering (`draw`) has no place here.
+  - Rust concepts: `impl Level` methods; `T: Colisionable` generic bounds on
+    `map_colision`; `(coord / TILE_SIZE) as usize` float→int truncation.
+  - Watch out: The out-of-bounds asymmetry (`colision` treats OOB as solid,
+    `solid_in_rect` treats OOB as not-solid) is preserved and tested — a real
+    gotcha worth the inline comments.
 
 #### Box 8 — Move `traits.rs`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/traits.rs` defines `Colisionable { get_rect -> Rect }`
   and `detect_collision`; it does **not** define an `Entity` trait with `draw`.
 - **Test**: `grep -rn "trait Entity" game/src` returns no matches; `cargo build -p game`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `Colisionable` and the generic `detect_collision` helper; removed
+    the `Entity` trait entirely.
+  - Why: `Entity` bundled `update` (simulation) with `draw` (rendering) — the
+    exact coupling this phase dissolves. `Colisionable` is pure simulation.
+  - Rust concepts: trait with a single method; generic free function
+    `detect_collision<A: Colisionable, B: Colisionable>`.
+  - Watch out: Removing `Entity` means the client must render via the new local
+    `Drawable` trait (Box 12) instead of a shared `draw`.
 
 #### Box 9 — Move `entities/bullet.rs` + `entities/nemesis.rs`
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/entities/bullet.rs` defines `Bullet` with `new`,
   `check_collision`, `update`, and `Colisionable` (`Rect::new(pos.x, pos.y, 5.0,
   5.0)`), no `draw`; `game/src/entities/nemesis.rs` defines `Nemesis` with `new`,
   no `draw`, no `update`; `game/src/entities/mod.rs` declares all four modules.
 - **Test**: `cargo build -p game`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `Bullet` (with physics/`update`/`check_collision`) and `Nemesis`
+    (the remote-player mirror, data-only) into `game`, dropping their `draw`.
+  - Why: `Bullet` physics belongs in the simulation; `Nemesis` is the shape the
+    server will eventually drive, so it too is pure data.
+  - Rust concepts: submodule layout (`entities/mod.rs` re-exporting
+    `bullet`/`enemy`/`nemesis`/`player`); `Colisionable` impl for `Bullet`.
+  - Watch out: `Nemesis` intentionally has no `update` — it is driven by network
+    state, not local simulation.
 
 #### Box 10 — Move `entities/player.rs` (input-driven)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/entities/player.rs` defines `PlayerInput` (held
   `move_left`/`move_right`, edge `jump`/`shoot`), `Player`, `Player::new`, and
   `Player::update(&mut self, dt, &Level, &PlayerInput)`; `update` contains no
@@ -476,14 +520,23 @@ tests → client split → gates); the group headings below are thematic.
   `vec2` → `Vec2::new`.
 - **Test**: `cargo test -p game player_input_`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `Player`, and changed `update` to take a `PlayerInput` struct
+    instead of reading `is_key_down`/`is_key_pressed` itself; `pos` is now
+    `glam::Vec2`.
+  - Why: This is the key enabling move for server-authoritative movement — the
+    server will feed `PlayerInput` over the network, so the simulation must be
+    input-agnostic. The client still builds `PlayerInput` from macroquad keys
+    (Box 14), so behavior is unchanged.
+  - Rust concepts: `&mut self` methods; a plain-data input struct
+    (`#[derive(Debug, Clone, Copy, Default)]`); held vs edge-triggered input
+    semantics.
+  - Watch out: Held (`move_*`) vs edge (`jump`/`shoot`) distinction is load-bearing
+    — `jump` is guarded by `&& self.grounded`, and `dir` is set before `shoot`.
+    The exact order of operations is preserved verbatim.
 
 #### Box 11 — Move `entities/enemy.rs` (+ `enemies_from_data`)
 
-- [ ] done
+- [x] done
 - **Acceptance**: `game/src/entities/enemy.rs` defines `EnemyState`, `EnemyKind`,
   `Enemy` with `kind` (no `color`), `Enemy::new(pos, kind)`, `die`, private
   `set_rand_state(random: u32)`, private `apply_physics`, and
@@ -494,10 +547,18 @@ tests → client split → gates); the group headings below are thematic.
 - **Test**: `cargo test -p game enemies_from_data` and `cargo test -p game
   enemy_set_rand_state`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Moved `Enemy`; replaced `color: Color` with `kind: EnemyKind`; made
+    `update` take an injected `random: u32` instead of calling `macroquad::rand`;
+    moved `enemies_from_data` here from `world/lib.rs`.
+  - Why: `Color` is a macroquad type, so it can't cross into `game`; `EnemyKind`
+    carries the same blue/green distinction without the graphics type. Injected
+    randomness keeps the simulation deterministic and macroquad-free — the client
+    supplies the draw.
+  - Rust concepts: enums (`EnemyState`, `EnemyKind`); `PartialEq` derive for test
+    assertions; private helper fns (`set_rand_state`, `apply_physics`) callable
+    from `update`.
+  - Watch out: `Potion` in `EnemyKind` is a placeholder — the owner clarified
+    potions should be a collectible, not an enemy; a future phase retires it.
 
 ### Group 3 — Client/rendering split (criteria 14–17)
 
@@ -654,37 +715,46 @@ tests → client split → gates); the group headings below are thematic.
 
 #### Box 17 — Verify `game` is macroquad-free
 
-- [ ] done
+- [x] done
 - **Acceptance**: `grep -rn "macroquad" game/` returns no matches; `game/src`
   contains no `draw_*`, `is_key_down`, `is_key_pressed`, or `Color` usage;
   `grep -rn "macroquad::rand" game/` returns nothing (enemy randomness is the
   injected `random: u32` param).
 - **Test**: the `grep` commands above.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Grep-verified `game/` is free of `macroquad` (even in prose), with no
+    `draw_*`, `Color`, or input reads.
+  - Why: The server will link `game` but not macroquad, so a stray macroquad
+    reference would break the 2b build. This is the acceptance criterion that
+    proves the boundary held.
+  - Rust concepts: none directly — a dependency-hygiene check via `grep`.
+  - Watch out: A single `macroquad::rand` or `Color` in `game` is the classic
+    leak; the injected-randomness design (Box 11) is what keeps this clean.
 
 ### Group 5 — Tests (criteria 20–21)
 
 #### Box 18 — Moved tests green in `game`
 
-- [ ] done
+- [x] done
 - **Acceptance**: the 17 moved inline tests (types/maps/level/enemies_from_data)
   live in `game` with `macroquad::Rect`→`game::Rect`, `vec2`→`Vec2::new`,
   `Color`→`EnemyKind` updates, and pass.
 - **Test**: `cargo test -p game` (the `types`/`maps`/`level`/`enemies_from_data`
   subset).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Relocated the 17 existing inline tests into `game` alongside their
+    modules, with the mechanical type updates (Rect/Vec2/EnemyKind).
+  - Why: Tests follow their subject; a refactor must move them with the code so
+    coverage isn't lost.
+  - Rust concepts: `#[cfg(test)] mod tests`; `use crate::rect::Rect` vs
+    `use macroquad::prelude::Rect`.
+  - Watch out: The `enemies_from_data_spawns_enemy_and_potion` test was
+    strengthened to assert `kind == EnemyKind::Enemy/Potion` (previously
+    impossible with `Color`).
 
 #### Box 19 — New tests green in `game`
 
-- [ ] done
+- [x] done
 - **Acceptance**: the 10 new tests (`rect_*` strict-`<`, `player_input_*`
   input-driven, `enemy_set_rand_state_maps_random_mod_4`) live in `game` and pass;
   none of them calls `draw` or any macroquad function (they build `Rect`/`Vec2`
@@ -692,22 +762,33 @@ tests → client split → gates); the group headings below are thematic.
 - **Test**: `cargo test -p game rect_`, `cargo test -p game player_input_`,
   `cargo test -p game enemy_set_rand_state`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Wrote the 10 new tests: 4 `rect` (incl. strict-`<` edge-touch), 5
+    `player_input` (move/jump/shoot against `PlayerInput`), 1
+    `enemy_set_rand_state` (the `random % 4` mapping).
+  - Why: These lock the *new* behavior introduced by the refactor — the local
+    `Rect` semantics and the input-driven/injected-randomness APIs — which the
+    moved tests don't cover.
+  - Rust concepts: `PlayerInput { move_right: true, ..Default::default() }`
+    struct-update syntax; asserting `EnemyState`/`EnemyKind` via `PartialEq`.
+  - Watch out: The `empty_level` fixture is 12×12 (not 3×3) — a 3×3 grid leaves
+    the (100,100) spawn out of bounds, which `colision` treats as solid, so the
+    player would be permanently stuck.
 
 #### Box 20 — Protocol round-trip tests untouched
 
-- [ ] done
+- [x] done
 - **Acceptance**: `protocol/tests/round_trip.rs` is unchanged and passes
   (`cargo test -p protocol`).
 - **Test**: `cargo test -p protocol`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Confirmed `protocol/tests/round_trip.rs` is byte-identical and its 6
+    tests pass.
+  - Why: This phase must not touch the wire format — `GamePacket` is untouched, so
+    the round-trip tests are a canary that no protocol drift slipped in.
+  - Rust concepts: integration tests (`tests/` dir) exercising only the public
+    API.
+  - Watch out: None — the protocol crate is independent of `game`; no coupling was
+    introduced.
 
 ### Group 6 — Quality gates (criteria 22–25)
 

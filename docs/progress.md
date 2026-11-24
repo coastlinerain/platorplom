@@ -61,3 +61,9 @@ Working memory for the project. **Update this at the end of every task.**
 - (follow-up) `Potion` is intended to be a collectible entity, not an enemy. The
   current `PotionSpawn → green Enemy` is a placeholder; a future phase should
   introduce a real `Potion` collectible and retire `EnemyKind::Potion`.
+- (2b forward note) Enemy RNG is drawn once per frame in `World::update` and
+  passed into `Enemy::update`, which only consumes it when the timer elapses.
+  Behavior is unchanged today, but 2b must NOT replicate a frame-rate-dependent
+  draw count — the server should use its own seedable RNG and draw
+  deterministically (one draw per enemy per decision at the fixed tick), or
+  client/server will desync.

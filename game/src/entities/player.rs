@@ -110,13 +110,10 @@ mod tests {
     use crate::types::{EntityType, TileType};
     use glam::Vec2;
 
-    // NOTE (deviation from plan Box 19): the plan specifies a 3x3 grid, but that
-    // is only 120x120 px. `Player::new(0)` spawns at (100.0, 100.0) with w=30 /
-    // h=38, so its right/bottom edges are already out of bounds — and `colision`
-    // (via `solid_point`) treats out-of-bounds as solid, so the player would be
-    // permanently stuck and every movement/jump/shoot would be rolled back. A
-    // 12x12 grid (480x480 px) keeps the spawn fully in bounds so the tests
-    // exercise the intended input-driven physics.
+    // NOTE: the fixture uses a 12x12 empty grid (480x480 px) so the player's
+    // (100,100) spawn with w=30/h=38 is fully in bounds. A 3x3 grid (120x120 px)
+    // would leave the player out of bounds, which `colision` (via `solid_point`)
+    // treats as solid — permanently stuck, rolling back every move/jump/shoot.
     fn empty_level() -> Level {
         Level::new(
             vec![vec![TileType::Empty; 12]; 12],
