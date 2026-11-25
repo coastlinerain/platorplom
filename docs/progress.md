@@ -134,3 +134,13 @@ Working memory for the project. **Update this at the end of every task.**
   missed a macroquad-context dependency (`GameCamera::update` → `screen_width`)
   that Box 2a then covered. CI now runs tests under Xvfb because the "headless"
   client still opens a macroquad window.
+- **Skills are advisory tools, not enforced steps (owner note)**: the subagent
+  definitions list relevant skills (`tdd`, `codebase-design`, `domain-modeling`,
+  `diagnosing-bugs`, `research`, `prototype`, `grilling`), but during Phase 2g no
+  subagent actually invoked the `skill` tool — they worked directly from
+  spec/plan/AGENTS.md. Owner's stance: do NOT force skill loading; keep skills as
+  reachable tools each agent can invoke when effective. Some cases would have
+  benefited from an explicit prompt (e.g. `grilling` for the design/decision
+  stress-test that was instead done as a plain Q&A). Next phase: when a task
+  matches a skill's purpose, prompt that subagent to reach for the skill rather
+  than assuming it will happen automatically.
