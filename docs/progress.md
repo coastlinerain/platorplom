@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-25 (Phase 2f COMPLETE - all quality gates green)
+> Last updated: 2026-11-25 (Phase 2g COMPLETE — all tests green, fmt/clippy clean, CI runs tests under Xvfb)
 
 ## Current status
 
@@ -62,11 +62,24 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Headless client (`--headless --duration=N --server=ADDR`)
 - [x] All 172+ tests pass, quality gates green
 
+## Phase 2g checklist
+- [x] Box 1 — `MAX_ACCUMULATED_FRAMES = 5`, `HEADLESS_BUSY_WAIT_MS = 1` (`game/src/config.rs`)
+- [x] Box 2 — `prev_player_pos`/`prev_player_dir` fields on `World` (spawn-seeded)
+- [x] Box 2a — decouple `World::update` from macroquad (input keys + camera viewport via `GameCamera::set_viewport`)
+- [x] Box 3 — store prev player state before `player.update`
+- [x] Box 4 — `interpolated_player_pos/dir(alpha)` + `draw(&self, alpha)`
+- [x] Box 5 — accumulator loop in GUI `main.rs` (clamp to 5 steps, interpolation alpha)
+- [x] Box 6 — headless hybrid sleep + busy-wait (`run_headless` non-async)
+- [x] Box 7 — server catch-up loop verification comment (no code change)
+- [x] Boxes 8–11 — unit tests (written by tester; now green)
+- [x] Boxes 12–15 — integration tests (written by tester; now green)
+- [x] Box 16 — fixed-rate input send verified (natural consequence of accumulator)
+- [x] Box 17 — `cargo test` + `cargo fmt --check` + `cargo clippy -- -D warnings` (green)
+
 ## Next actions (top = do first)
 
-1. **Phase 2g fixed timestep** — spec approved, plan written + Box 2a (input
-   decoupling) added, plan re-review pending, RED tests written. Next: re-review
-   plan → create `feat/phase-2g-fixed-timestep` branch → implementer.
+1. **Phase 2g code review + QA** — run the pipeline `reviewer` (code mode) and
+   `qa` passes on the Phase 2g diff; then ask owner before push/PR.
 2. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
    drop "30 FPS floor" wording (done in spec/plan); add `GLOSSARY.md` (done).
 3. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
@@ -102,11 +115,22 @@ Working memory for the project. **Update this at the end of every task.**
   (145 tests, all gates green). Server validates hits, tracks enemy death state,
   broadcasts `BulletSpawn` to ALL clients and `EnemyDied` to room clients.
 - **Process violation resolved**: Phase 2f was properly implemented through spec→plan→review→test→implement pipeline. All boxes checked, Explain blocks filled, 172 tests pass, quality gates green.
-- (2g in progress) Fixed-timestep spec + plan drafted. Grill with owner surfaced:
-  (a) the accumulator's job is deterministic sim for prediction/reconciliation,
-  NOT a render-floor guarantee — spec's "30 FPS floor" claim was mathematically
-  wrong (clamp=5 keeps full 60Hz sim down to 12 FPS render) and has been removed;
-  (b) `CLIENT_HZ` will rename to `RENDER_HZ`; (c) `GLOSSARY.md` created with
-  server/client tick + frame + netcode terms; (d) Spanish→English cleanup deferred
-  to its own task. Owner's stated goal: seamless online experience with an
-  authoritative server → recorded as a netcode-smoothness follow-up.
+- (2g implemented) Fixed-timestep spec + plan + RED tests → implementation complete.
+  All 17 boxes (incl. Box 2a input decoupling) done; Explain fields filled. Grill
+  with owner surfaced: (a) the accumulator's job is deterministic sim for
+  prediction/reconciliation, NOT a render-floor guarantee — spec's "30 FPS floor"
+  claim was mathematically wrong (clamp=5 keeps full 60Hz sim down to 12 FPS
+  render) and has been removed; (b) `CLIENT_HZ` will rename to `RENDER_HZ`;
+  (c) `GLOSSARY.md` created; (d) Spanish→English cleanup deferred. Owner's goal:
+  seamless online experience → netcode-smoothness follow-up.
+- **Implementer/tester shell denial (resolved)**: the `implementer` and `tester`
+  subagents' `shell` tool returned `Permission denied: shell`, so neither could
+  run `cargo test`/`fmt`/`clippy` or `git add`/`git commit`. The orchestrator
+  took over verification + commit. This surfaced a cluster of tester-authored
+  RED-test bugs that were never executed (all now fixed): `std::env::set_var`
+  is `unsafe` in edition 2024; `gui_accumulator` off-by-one (`client_tick`
+  reset by the deferred `JoinResponse`); `cargo run --bin` vs `-p` ambiguity
+  when CWD is `e2e/`; one `clippy::collapsible_if`. The `implementer` also
+  missed a macroquad-context dependency (`GameCamera::update` → `screen_width`)
+  that Box 2a then covered. CI now runs tests under Xvfb because the "headless"
+  client still opens a macroquad window.

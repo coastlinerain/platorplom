@@ -432,3 +432,41 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `game/src/config.rs` (`STALENESS_THRESHOLD_TICKS = 5`), `client/src/network/world.rs` (staleness check).
 - **What it is**: If `server_tick_estimate - last_acked_server_tick > STALENESS_THRESHOLD_TICKS`, network may be stalled. Force reconciliation or log warning.
 - **Gotcha / insight**: `server_tick_estimate` is `client_tick + server_tick_offset` (both can be negative early on). Use `saturating_sub` and check `> 0` before comparing to threshold.
+
+## Phase 2g (2026-11-25) — Fixed Timestep & Accumulator Pattern
+
+### Accumulator pattern (fixed timestep) — `get_time()` vs `get_frame_time()` (2026-11-25)
+
+- **Where**: `client/src/main.rs` (GUI loop).
+- **What it is**: Each render frame, accumulate the real elapsed `frame_dt = get_time() - last_time`, clamp it to `MAX_ACCUMULATED_FRAMES * tick_dt` (spiral-of-death protection), then run 0..=5 fixed `update(TICK_DT)` steps and render with `alpha = accumulator / tick_dt`. Simulation runs at a fixed 60Hz regardless of render rate; only the *render* is interpolated.
+- **Gotcha / insight**: `get_time()` returns `f64` (seconds since start), while the old `get_frame_time()` returns `f32` (the last frame's delta). Mixing them in the same `accumulator += frame_dt` expression is a type error — keep the accumulator in `f64` and cast to `f32` only at the `update(tick_dt as f32)` / `draw(alpha as f32)` boundary. The clamp is a *safety* bound (prevents runaway catch-up), not a render-floor guarantee.
+
+### `std::hint::spin_loop()` — hybrid sleep + busy-wait (2026-11-25)
+
+- **Where**: `client/src/main.rs` (`run_headless`).
+- **What it is**: To hit true 60Hz without drift, the loop advances `next_tick += tick_interval` (a monotonic `Instant`), sleeps for `remaining - HEADLESS_BUSY_WAIT_MS` (most of the interval), then busy-waits the last ~1ms with `while Instant::now() < next_tick { std::hint::spin_loop() }`. `spin_loop` is a hint to the CPU (like `PAUSE`) that keeps the thread alive without a full context switch, giving sub-millisecond precision.
+- **Gotcha / insight**: `std::thread::sleep` has ~1ms precision on Linux and ~15ms on Windows, so a plain `sleep(16)` drifts (~62.5Hz). Sleeping for the bulk and busy-waiting only the final ~1ms costs ~6% CPU at 60Hz — the owner-approved tradeoff. Advance `next_tick += interval` (not `next_tick = now + interval`) to avoid accumulating drift.
+
+### `glam::Vec2::lerp` for render interpolation (2026-11-25)
+
+- **Where**: `client/src/world/game.rs` (`interpolated_player_pos`).
+- **What it is**: `self.prev_player_pos.lerp(self.player.pos, a)` returns `prev + (curr - prev) * a`, the standard linear interpolation. Combined with `alpha.clamp(0.0, 1.0)` it interpolates the local player between the previous and current sim-tick positions for smooth motion.
+- **Gotcha / insight**: `Vec2` is `Copy`, so `player.pos` can be copied into a local before `player` is moved into the struct literal. For the *direction* (`interpolated_player_dir`), simple linear lerp misbehaves across the -π/π boundary; it's accepted here because per-tick angle changes are small (documented in the plan's Box 4 Watch out).
+
+### Decoupling input sampling from simulation (dependency injection for testability) (2026-11-25)
+
+- **Where**: `client/src/world/game.rs` (`World::update`), `client/src/main.rs` (GUI loop).
+- **What it is**: `World::update` stopped calling `is_key_pressed`/`is_key_down` and instead reads injected `move_left`/`move_right`/`pressed_jump`/`pressed_shoot` fields. The GUI loop samples the keyboard once per render frame and writes those fields before calling `update`. The simulation crate therefore has no macroquad *input* dependency and can run headlessly under `#[cfg(test)]` and in the e2e harness.
+- **Gotcha / insight**: macroquad *input* functions (`is_key_pressed`, `is_key_down`) panic when no window exists, but `macroquad::rand::gen_range` is context-free (it's a thread-local PRNG, `quad_rand`). So only the input calls had to move out — the enemy RNG call could stay. This is the same idea as Phase 2a's `PlayerInput`, taken one step further: even *sampling* the input is now outside the simulation.
+
+### Decoupling the camera from screen dimensions (a second macroquad dependency) (2026-11-25)
+
+- **Where**: `client/src/camera.rs` (`GameCamera`), `client/src/world/game.rs` (`World::update`), `client/src/main.rs`.
+- **What it is**: `GameCamera::update` originally called `screen_width()`/`screen_height()`, which — like the input functions — panic outside a macroquad window (`get_context` → `assert!(THREAD_ID.is_some())`). This was a *second* macroquad-context dependency that Box 2a's input-decoupling description did not call out, and it broke every unit/e2e test that ran `World::update` headlessly. The fix: `GameCamera` stores injected `view_width`/`view_height` fields (default 1280×720), updated each frame in the GUI loop via `set_viewport(screen_width(), screen_height())`.
+- **Gotcha / insight**: `screen_width`/`screen_height` are *context* queries, not *input* — grepping for `is_key_pressed`/`is_key_down` missed them. When decoupling a simulation from a windowing library, audit for **all** context-requiring calls (`screen_width`, `get_time`, `get_frame_time`, `get_mouse_position`, …), not just input.
+
+### Edition 2024 gotchas surfaced by the RED tests (2026-11-25)
+
+- **Where**: `e2e/tests/packet_log_rate.rs`.
+- **What it is**: Two edition-2024 changes tripped up tests that were written but never executed (the tester's shell was denied): (1) `std::env::set_var`/`remove_var` are now `unsafe` (concurrent reads of the same var while another thread calls `set_var` are UB), so it must be wrapped in an `unsafe` block with a SAFETY comment; (2) `clippy::collapsible_if` fires on a nested `if { if let Some(..) { .. } }`, which collapses into a *let-chain*: `if cond && let Some(x) = expr { .. }`.
+- **Gotcha / insight**: let-chains (`&& let`) are stable in edition 2024. A RED test that was never compiled/run can hide both kinds of issue — the subagent shell-denial meant the orchestrator had to be the first to actually execute them.

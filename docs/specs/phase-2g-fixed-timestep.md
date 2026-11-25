@@ -1,6 +1,6 @@
 # Phase 2g — Fixed Timestep & Accumulator Pattern
 
-- Status: approved
+- Status: implemented
 - Date: 2026-11-25
 - Branch: `feat/phase-2g-fixed-timestep`
 
@@ -346,3 +346,8 @@ The following product/trade-off decisions were confirmed by the owner:
 1. **Headless CPU — 1ms busy-wait accepted**: Use `std::hint::spin_loop()` for the last ~1ms of each tick interval. Achieves ±0.1ms accuracy; 6% CPU at 60Hz is negligible on modern CI runners.
 
 2. **Nemesis Alpha — Local player only**: Remote nemesis entities keep their tick-based interpolation from Phase 2f. Alpha-based sub-tick lerp is not applied to nemesis, avoiding complexity and potential conflict with the jitter buffer.
+
+## Follow-up (deviations from spec, recorded at implementation)
+
+1. **"Headless" client still opens a window.** The spec's `--headless` mode reuses the GUI binary behind `#[macroquad::main]`, so it still needs a display (panics with `XOpenDisplay() failed!` without one). This was worked around in CI (`xvfb-run`), not fixed. A future phase should make the headless client truly window-less (a separate binary with a plain `fn main` and no macroquad), so it can run on bare CI runners without Xvfb.
+2. **Box 2a scope grew to include the camera.** The plan's input-decoupling box originally covered only `is_key_pressed`/`is_key_down`. During implementation a *second* macroquad-context dependency surfaced — `GameCamera::update` calling `screen_width()`/`screen_height()` — which also panics without a window. The box was extended to inject the viewport via `GameCamera::set_viewport`, and the spec/plan wording was updated accordingly.
