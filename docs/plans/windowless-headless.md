@@ -205,7 +205,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 3 — Trim `main.rs` to GUI-only, rewire e2e, drop Xvfb from CI
 
-- [ ] done
+- [x] done
 - **Files**: edit `client/src/main.rs`; edit `e2e/src/process.rs`; edit `.github/workflows/ci.yml`; edit `README.md`.
 - **Change**:
   - `client/src/main.rs`:
@@ -249,24 +249,52 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   Xvfb.
 - **Test**: T4, T7, T8 (grep) + `cargo test --workspace` (T9, no Xvfb) + `cargo clippy --all-targets --all-features --workspace -- -D warnings` (T10) + `cargo fmt --check --all` (T11).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Rewrote `client/src/main.rs` to GUI-only — kept `#[macroquad::main]`,
+    `sample_ui_event`, and the render loop, dropped the `--headless`/`--duration`
+    parsing, `run_headless`, and the local `RealPacketIO`/`HeadlessPacketIO`/
+    `make_transport_factory`. It now parses only `--server=ADDR`, imports
+    `make_transport_factory` from the lib, and builds
+    `App::new(make_transport_factory(server_addr, false), false)`. Rewired
+    `e2e/src/process.rs::run_headless_client` to spawn
+    `cargo run -p metroidvania-rust --bin rustvania-headless --features headless
+    -- --duration=N --server=127.0.0.1:12345` (dropped `--headless`) and updated
+    its doc comment. Removed the Xvfb install + `xvfb-run` wrapper from CI and
+    changed clippy to `--all-targets --all-features --workspace`. Updated
+    `README.md` to `cargo run --bin metroidvania-rust`.
+  - Why: After the bin split, `main.rs` is the GUI-only entry point and must not
+    carry headless-only machinery (or the now-dead `--headless` flag, whose
+    removal makes `RealPacketIO` etc. unreachable from `main.rs`). The e2e
+    subprocess must target the new windowless binary so tests run without a
+    display; CI drops Xvfb because nothing opens a window anymore; bare
+    `cargo run` is now ambiguous with two bins, hence `--bin`.
+  - Rust concepts: import hygiene under `clippy::unused_imports -D warnings`
+    (`TransportFactory`/`PacketIO`/`game::config::*`/`Duration` are gone because
+    they're no longer named), path-based re-export usage
+    (`metroidvania_rust::make_transport_factory`), and Cargo's `--bin`/`--features`
+    CLI selection vs. `required-features` gating.
+  - Watch out: the plan's T4 grep pattern
+    (`make_transport_factory\|RealPacketIO\|HeadlessPacketIO` in `main.rs`) is
+    too broad — `make_transport_factory` legitimately remains in `main.rs` as the
+    lib import + call (Box 3 requires it), so T4 does not match "no match"
+    literally. What is actually gone (and verified) is every *definition*:
+    `struct RealPacketIO`, `struct HeadlessPacketIO`, `fn make_transport_factory`,
+    and `fn run_headless` have no match. The two I/O structs are entirely absent.
+    I judged "definitions moved out" (the real intent) satisfied and left the
+    call site, exactly as Box 3 specifies.
 
 ## Definition of done
 
 Acceptance criteria from `docs/specs/windowless-headless.md`, verbatim:
 
-- [ ] `client/src/main_headless.rs` contains no `#[macroquad::main]` (grep-able) and its entry point is a plain `fn main()`.
-- [ ] `client/Cargo.toml` declares `gui`/`headless` features, `default = ["gui"]`, and two `[[bin]]` entries with the correct `required-features`.
-- [ ] `make_transport_factory` (and the two I/O structs) live in `client/src/network/transport.rs`, are no longer in `main.rs`, and `make_transport_factory` is re-exported from `client/src/lib.rs`.
-- [ ] `e2e/src/process.rs` spawns `rustvania-headless` with `--features headless` and no `--headless` flag.
-- [ ] `cargo test --workspace` passes **without Xvfb** (the `headless_timing` and `packet_log_rate` subprocess tests run the windowless binary).
+- [x] `client/src/main_headless.rs` contains no `#[macroquad::main]` (grep-able) and its entry point is a plain `fn main()`.
+- [x] `client/Cargo.toml` declares `gui`/`headless` features, `default = ["gui"]`, and two `[[bin]]` entries with the correct `required-features`.
+- [x] `make_transport_factory` (and the two I/O structs) live in `client/src/network/transport.rs`, are no longer in `main.rs`, and `make_transport_factory` is re-exported from `client/src/lib.rs`.
+- [x] `e2e/src/process.rs` spawns `rustvania-headless` with `--features headless` and no `--headless` flag.
+- [x] `cargo test --workspace` passes **without Xvfb** (the `headless_timing` and `packet_log_rate` subprocess tests run the windowless binary).
 - [ ] `cargo run --bin metroidvania-rust` still opens the window and plays as before.
-- [ ] `cargo clippy --all-targets --all-features --workspace -- -D warnings` is clean (both binaries covered).
-- [ ] `cargo fmt --check --all` is clean.
-- [ ] No diff in `protocol/` or `server/`.
+- [x] `cargo clippy --all-targets --all-features --workspace -- -D warnings` is clean (both binaries covered).
+- [x] `cargo fmt --check --all` is clean.
+- [x] No diff in `protocol/` or `server/`.
 
 ## Open questions
 

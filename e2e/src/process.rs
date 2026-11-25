@@ -1,5 +1,5 @@
 //! Shared helpers to spawn the real server + headless client binaries for the
-//! e2e tests that exercise the actual `--headless` subprocess path.
+//! e2e tests that exercise the actual `rustvania-headless` subprocess path.
 //!
 //! The headless client now genuinely connects (game-state-machine G8), so these
 //! tests must run against a live server. The server binary hardcodes
@@ -50,10 +50,11 @@ impl Drop for ServerGuard {
 /// Run the headless client for `duration_secs` against a live server.
 ///
 /// Serializes on the shared server port, spawns the server, then spawns the
-/// client (`--headless --duration=N --server=127.0.0.1:12345`). When
-/// `log_packets` is true the client's `RUSTVANIA_PACKET_LOG` is set (the server
-/// is never given it, keeping CI output bounded). Returns the client's stdout
-/// and the wall-clock elapsed of the client run.
+/// client (`--bin rustvania-headless --features headless -- --duration=N
+/// --server=127.0.0.1:12345`). When `log_packets` is true the client's
+/// `RUSTVANIA_PACKET_LOG` is set (the server is never given it, keeping CI
+/// output bounded). Returns the client's stdout and the wall-clock elapsed of
+/// the client run.
 pub fn run_headless_client(duration_secs: u64, log_packets: bool) -> (String, Duration) {
     let _guard = SERVER_PORT_LOCK.lock().expect("server port lock poisoned");
     let _server = ServerGuard::spawn();
@@ -64,8 +65,11 @@ pub fn run_headless_client(duration_secs: u64, log_packets: bool) -> (String, Du
         "run",
         "-p",
         "metroidvania-rust",
+        "--bin",
+        "rustvania-headless",
+        "--features",
+        "headless",
         "--",
-        "--headless",
         &format!("--duration={}", duration_secs),
         "--server=127.0.0.1:12345",
     ])

@@ -21,7 +21,7 @@ cd server && cargo run
 ### Client
 
 ```sh
-cd client && cargo run
+cd client && cargo run --bin metroidvania-rust
 ```
 
 ## Status
