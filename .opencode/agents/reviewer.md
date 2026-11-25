@@ -13,22 +13,58 @@ permissions:
     effect: deny
   - action: shell
     resource: "*"
+    effect: allow
+  - action: shell
+    resource: "git push *"
     effect: deny
   - action: shell
-    resource: "cargo *"
-    effect: allow
+    resource: "rm *"
+    effect: deny
   - action: shell
-    resource: "git diff *"
-    effect: allow
+    resource: "mv *"
+    effect: deny
   - action: shell
-    resource: "git status *"
-    effect: allow
+    resource: "git add *"
+    effect: deny
   - action: shell
-    resource: "git log *"
-    effect: allow
+    resource: "git commit *"
+    effect: deny
   - action: shell
-    resource: "git show *"
-    effect: allow
+    resource: "git checkout *"
+    effect: deny
+  - action: shell
+    resource: "git stash *"
+    effect: deny
+  - action: shell
+    resource: "git rm *"
+    effect: deny
+  - action: shell
+    resource: "git mv *"
+    effect: deny
+  - action: shell
+    resource: "git branch *"
+    effect: deny
+  - action: shell
+    resource: "git merge *"
+    effect: deny
+  - action: shell
+    resource: "git reset *"
+    effect: deny
+  - action: shell
+    resource: "git rebase *"
+    effect: deny
+  - action: shell
+    resource: "git cherry-pick *"
+    effect: deny
+  - action: shell
+    resource: "git revert *"
+    effect: deny
+  - action: shell
+    resource: "git tag *"
+    effect: deny
+  - action: shell
+    resource: "git clean *"
+    effect: deny
 ---
 
 You review work critically and report findings in severity order with file and

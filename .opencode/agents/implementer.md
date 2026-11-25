@@ -13,34 +13,46 @@ permissions:
     effect: allow
   - action: shell
     resource: "*"
+    effect: allow
+  - action: shell
+    resource: "git push *"
     effect: deny
   - action: shell
-    resource: "cargo *"
-    effect: allow
+    resource: "rm *"
+    effect: deny
   - action: shell
-    resource: "git status *"
-    effect: allow
+    resource: "mv *"
+    effect: deny
   - action: shell
-    resource: "git log *"
-    effect: allow
+    resource: "git rm *"
+    effect: deny
   - action: shell
-    resource: "git diff *"
-    effect: allow
+    resource: "git mv *"
+    effect: deny
   - action: shell
-    resource: "git show *"
-    effect: allow
+    resource: "git branch *"
+    effect: deny
   - action: shell
-    resource: "git add *"
-    effect: allow
+    resource: "git merge *"
+    effect: deny
   - action: shell
-    resource: "git commit *"
-    effect: allow
+    resource: "git reset *"
+    effect: deny
   - action: shell
-    resource: "git checkout *"
-    effect: allow
+    resource: "git rebase *"
+    effect: deny
   - action: shell
-    resource: "git stash *"
-    effect: allow
+    resource: "git cherry-pick *"
+    effect: deny
+  - action: shell
+    resource: "git revert *"
+    effect: deny
+  - action: shell
+    resource: "git tag *"
+    effect: deny
+  - action: shell
+    resource: "git clean *"
+    effect: deny
 ---
 
 You implement a feature from its plan. Read `docs/plans/<feature>.md` (and its

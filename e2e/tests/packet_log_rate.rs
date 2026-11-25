@@ -9,8 +9,7 @@
 // average interval is close to 16.666ms (coarse). Precise sub-ms verification is
 // covered by the headless timing test (Box 12) and code review (Box 7).
 
-use std::process::Command;
-use std::time::Duration;
+use e2e::run_headless_client;
 
 /// Extract the leading integer `ts_ms` value from a JSONL log line.
 fn extract_ts_ms(line: &str) -> Option<u64> {
@@ -24,35 +23,13 @@ fn extract_ts_ms(line: &str) -> Option<u64> {
 #[test]
 fn packet_log_playerinput_rate() {
     // A server is required so the client receives a JoinResponse and gets an id;
-    // `update_network` only sends PlayerInput once an id is assigned. The server
-    // is NOT given RUSTVANIA_PACKET_LOG — only the client logs, so CI stays quiet.
-    let mut server = Command::new("cargo")
-        .args(["run", "-p", "metroidvania-server"])
-        .spawn()
-        .expect("failed to start server");
-    std::thread::sleep(Duration::from_millis(500));
-
+    // `update_network` only sends PlayerInput once an id is assigned. The shared
+    // helper spawns the server (which is killed on teardown) and scopes the log
+    // flag to the client child only (avoids a process-wide `unsafe { set_var }`
+    // and keeps the spawned server from flooding CI).
     let duration_secs = 3u64;
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "metroidvania-rust",
-            "--",
-            "--headless",
-            &format!("--duration={}", duration_secs),
-            "--server=127.0.0.1:12345",
-        ])
-        // Scope the log flag to the client child only (avoids a process-wide
-        // `unsafe { set_var }` and keeps the spawned server from flooding CI).
-        .env("RUSTVANIA_PACKET_LOG", "1")
-        .output()
-        .expect("failed to run headless client");
+    let (stdout, _) = run_headless_client(duration_secs, /*log_packets=*/ true);
 
-    let _ = server.kill();
-    let _ = server.wait();
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut timestamps: Vec<u64> = Vec::new();
     for line in stdout.lines() {
         if line.contains("\"dir\":\"sent\"")

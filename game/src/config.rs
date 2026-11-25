@@ -29,6 +29,12 @@ pub const MAX_ACCUMULATED_FRAMES: u32 = 5;
 /// tick interval (the remainder is covered by `std::thread::sleep`).
 pub const HEADLESS_BUSY_WAIT_MS: u64 = 1;
 
+/// Client connect timeout: give up waiting for `JoinResponse` after this long.
+pub const CONNECT_TIMEOUT_MS: u64 = 5000;
+
+/// Disconnect watchdog: fire `ConnectionLost` if no `PlayerPos` for this long.
+pub const DISCONNECT_TIMEOUT_MS: u64 = 1000;
+
 #[cfg(test)]
 mod tests {
     use super::*;

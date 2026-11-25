@@ -4,6 +4,7 @@ pub mod fixed_timestep;
 pub mod level;
 pub mod maps;
 pub mod rect;
+pub mod state_machine;
 pub mod traits;
 pub mod types;
 
