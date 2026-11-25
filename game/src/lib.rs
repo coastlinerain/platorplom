@@ -1,5 +1,6 @@
 pub mod config;
 pub mod entities;
+pub mod fixed_timestep;
 pub mod level;
 pub mod maps;
 pub mod rect;

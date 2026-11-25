@@ -10,30 +10,24 @@
 
 use e2e::harness::TestHarness;
 use game::config::{MAX_ACCUMULATED_FRAMES, TICK_HZ};
+use game::fixed_timestep::FixedTimestep;
 use metroidvania_rust::network::world::handle_packet;
 
 const TICK_DT: f32 = 1.0 / TICK_HZ as f32;
 
-/// Simulate one render frame of the accumulator loop: accumulate `frame_dt`,
-/// clamp to `MAX_ACCUMULATED_FRAMES` ticks, run `update(TICK_DT)` per sim tick.
-/// Returns the number of sim steps executed this frame.
+/// Simulate one render frame of the accumulator loop. The accumulate → clamp →
+/// step logic lives in `FixedTimestep` (the same implementation production's
+/// `client/src/main.rs` uses), so `advance` returns how many fixed `update`
+/// steps to run this frame.
 fn simulate_frame(
     harness: &mut TestHarness,
     handle: e2e::ClientHandle,
-    frame_dt: f32,
-    acc: &mut f32,
+    frame_dt: f64,
+    timestep: &mut FixedTimestep,
 ) -> u32 {
-    let max_acc = MAX_ACCUMULATED_FRAMES as f32 * TICK_DT;
-    *acc += frame_dt;
-    if *acc > max_acc {
-        *acc = max_acc;
-    }
-
-    let mut steps = 0u32;
-    while *acc >= TICK_DT {
+    let steps = timestep.advance(frame_dt);
+    for _ in 0..steps {
         harness.client_mut(handle).world.update(TICK_DT);
-        *acc -= TICK_DT;
-        steps += 1;
     }
     steps
 }
@@ -68,12 +62,12 @@ fn gui_accumulator_30_fps() {
     // 30 FPS → 2 sim steps per frame on average. 60 frames = 2.0s = ~120 steps.
     let mut h = TestHarness::new();
     let p = connect_joined_client(&mut h);
-    let frame_dt = 1.0f32 / 30.0;
-    let mut acc = 0.0f32;
+    let frame_dt = 1.0f64 / 30.0;
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
     let mut total = 0u32;
 
     for _ in 0..60 {
-        total += simulate_frame(&mut h, p, frame_dt, &mut acc);
+        total += simulate_frame(&mut h, p, frame_dt, &mut timestep);
     }
 
     assert!(
@@ -89,12 +83,12 @@ fn gui_accumulator_60_fps() {
     // 60 FPS → exactly 1 sim step per frame (frame_dt == TICK_DT).
     let mut h = TestHarness::new();
     let p = connect_joined_client(&mut h);
-    let frame_dt = 1.0f32 / 60.0;
-    let mut acc = 0.0f32;
+    let frame_dt = 1.0f64 / 60.0;
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
     let mut total = 0u32;
 
     for _ in 0..60 {
-        total += simulate_frame(&mut h, p, frame_dt, &mut acc);
+        total += simulate_frame(&mut h, p, frame_dt, &mut timestep);
     }
 
     assert_eq!(
@@ -109,12 +103,12 @@ fn gui_accumulator_144_fps() {
     // 144 FPS → ~0.417 sim steps per frame. 144 frames = 1.0s = ~60 steps.
     let mut h = TestHarness::new();
     let p = connect_joined_client(&mut h);
-    let frame_dt = 1.0f32 / 144.0;
-    let mut acc = 0.0f32;
+    let frame_dt = 1.0f64 / 144.0;
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
     let mut total = 0u32;
 
     for _ in 0..144 {
-        total += simulate_frame(&mut h, p, frame_dt, &mut acc);
+        total += simulate_frame(&mut h, p, frame_dt, &mut timestep);
     }
 
     assert!(
@@ -130,12 +124,12 @@ fn gui_accumulator_10_fps_clamped() {
     // 10 FPS → 100ms per frame → clamped to 5 sim steps per frame.
     let mut h = TestHarness::new();
     let p = connect_joined_client(&mut h);
-    let frame_dt = 1.0f32 / 10.0;
-    let mut acc = 0.0f32;
+    let frame_dt = 1.0f64 / 10.0;
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
     let mut total = 0u32;
 
     for _ in 0..10 {
-        total += simulate_frame(&mut h, p, frame_dt, &mut acc);
+        total += simulate_frame(&mut h, p, frame_dt, &mut timestep);
     }
 
     assert_eq!(
@@ -151,9 +145,9 @@ fn gui_accumulator_spiral_of_death_protection() {
     // not run 60.
     let mut h = TestHarness::new();
     let p = connect_joined_client(&mut h);
-    let mut acc = 0.0f32;
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
 
-    let steps = simulate_frame(&mut h, p, 1.0f32, &mut acc);
+    let steps = simulate_frame(&mut h, p, 1.0f64, &mut timestep);
 
     assert_eq!(steps, MAX_ACCUMULATED_FRAMES);
     assert_eq!(h.client(p).world.client_tick, MAX_ACCUMULATED_FRAMES as u64);

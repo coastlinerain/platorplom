@@ -303,3 +303,30 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 - **Why**: `World::update` stores `prev_player_*` *before* simulating, then `check_level_transitions` teleports `player.pos` afterward. On the transition frame, `draw(alpha)` would lerp from the old-room position to the new-room entry position for one frame while the level is already rendered at the new coords — a one-frame visual glitch. Snapping the interpolation source to the post-teleport position makes `draw` render at the new spawn.
 - **Rust concepts**: mutable-field assignment on `&mut World`; disjoint field writes (`world.prev_player_pos`/`prev_player_dir` vs `world.player.pos`/`dir`); the borrow of `p: &mut world.player` has already ended (NLL) before the `if changed` block, so re-reading `world.player.pos` is allowed.
 - **Watch out**: The death path (`handle_death`) is called *before* the prev-state store in `update`, so it was already correct — the added reset there is purely defensive and preserves the invariant that `prev_player_*` never holds a stale pre-teleport position. No test was changed; existing interpolation tests are unaffected because they set `prev_player_*` explicitly.
+
+## QA finding m2 refactor — extract shared `FixedTimestep` (2026-11-25)
+
+- **What**: Extracted the accumulate → clamp → step → alpha accumulator into a shared
+  pure helper, `game::fixed_timestep::FixedTimestep` (new module, re-exported from
+  `game/src/lib.rs`). Both `client/src/main.rs`'s GUI loop and `e2e/tests/gui_accumulator.rs`
+  now drive their simulation through it, removing the duplicated inline arithmetic.
+  Added `FixedTimestep::with_max_accumulator` (decouples the clamp from the guard)
+  and two unit tests, one of which proves the `steps < max_frames` guard actually
+  binds.
+- **Why**: QA m2 — the accumulator logic was copy-pasted between production and the
+  e2e test, and the spiral-of-death guard (`steps < MAX_ACCUMULATED_FRAMES`) was
+  provably dead: with `max_accumulator = max_frames * tick_dt`, the clamp already
+  bounds the accumulator to `max_frames` ticks, so the guard could never be the
+  binding constraint and no test would fail if it were removed.
+- **Rust concepts**: struct-with-methods encapsulation of stateful loop logic;
+  `&mut self` on `advance` (it mutates the accumulator) vs `&self` on `alpha`
+  (read-only); `u32` step counting; private fields exposed only through public
+  constructors (`new` derives `max_accumulator`, `with_max_accumulator` lets a test
+  decouple it); `#[cfg(test)]` unit-test module with `use crate::config::TICK_HZ`.
+- **Watch out**: The guard test *must* decouple `max_accumulator` from `max_frames`
+  (via `with_max_accumulator`) or the clamp masks the guard and the test becomes
+  tautological. `advance` returns a step *count*; callers still own the actual
+  `World::update(TICK_DT)` call (production computes in f64, casts to f32 only at
+  the `update` boundary). The client unit tests (Box 9/11 in `client/src/world/game.rs`)
+  still contain inline accumulator arithmetic — left as-is to keep this refactor
+  scoped (candidate for a follow-up).

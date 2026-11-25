@@ -1,6 +1,7 @@
 mod hud;
 
 use game::config::{HEADLESS_BUSY_WAIT_MS, MAX_ACCUMULATED_FRAMES, TICK_HZ};
+use game::fixed_timestep::FixedTimestep;
 use game::maps::Map;
 use macroquad::prelude::*;
 use metroidvania_rust::network::logging::log_packet;
@@ -184,12 +185,10 @@ async fn main() {
     let mut game_world = World::new(world_data, boxed);
 
     // Fixed-timestep accumulator (spec D1): separate the simulation dt (fixed
-    // 1/60s) from the render dt (variable). Each frame we accumulate the real
-    // elapsed time, run 0..=MAX_ACCUMULATED_FRAMES sim steps, then render with
-    // an interpolation alpha so motion looks smooth between ticks.
-    let tick_dt = 1.0f64 / TICK_HZ as f64;
-    let max_accumulator = MAX_ACCUMULATED_FRAMES as f64 * tick_dt;
-    let mut accumulator = 0.0f64;
+    // 1/60s) from the render dt (variable). `FixedTimestep` owns the
+    // accumulate → clamp → step → alpha logic (shared with the e2e tests).
+    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
+    let tick_dt = 1.0 / TICK_HZ as f32;
     let mut last_time = get_time();
 
     loop {
@@ -222,11 +221,6 @@ async fn main() {
         let frame_dt = current_time - last_time;
         last_time = current_time;
 
-        accumulator += frame_dt;
-        if accumulator > max_accumulator {
-            accumulator = max_accumulator;
-        }
-
         // Inject the current viewport once per render frame (the camera does
         // not query `screen_width`/`screen_height` itself, so `World::update`
         // stays headless-testable). Must run BEFORE the accumulator loop below.
@@ -235,16 +229,13 @@ async fn main() {
             .set_viewport(screen_width(), screen_height());
 
         // Run 0..=MAX_ACCUMULATED_FRAMES fixed-dt simulation steps.
-        let mut steps = 0u32;
-        while accumulator >= tick_dt && steps < MAX_ACCUMULATED_FRAMES {
-            game_world.update(tick_dt as f32);
-            accumulator -= tick_dt;
-            steps += 1;
+        let steps = timestep.advance(frame_dt);
+        for _ in 0..steps {
+            game_world.update(tick_dt);
         }
 
         // Interpolation alpha ∈ [0, 1): 0.0 = previous tick, ~1.0 = next tick.
-        let alpha = (accumulator / tick_dt) as f32;
-        game_world.draw(alpha);
+        game_world.draw(timestep.alpha());
 
         next_frame().await
     }
