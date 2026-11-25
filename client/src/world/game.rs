@@ -8,6 +8,7 @@ use crate::world::lib::{
 use crate::network::interpolation::RemoteInterp;
 use crate::network::prediction::InputRingBuffer;
 use crate::network::world::update_network;
+use game::config::INTERPOLATION_DELAY_TICKS;
 use game::entities::bullet::Bullet;
 use game::entities::enemy::Enemy;
 use game::entities::nemesis::Nemesis;
@@ -62,6 +63,7 @@ pub struct World {
     pub clock_offset_ms: i64,    // server_time_ms - local_time_ms (estimated)
     pub last_server_tick: u64,
     pub last_server_time_ms: u64,
+    pub last_acked_server_tick: u64, // for staleness heuristic
 }
 
 impl fmt::Debug for World {
@@ -125,6 +127,7 @@ impl World {
             clock_offset_ms: 0,
             last_server_tick: 0,
             last_server_time_ms: 0,
+            last_acked_server_tick: 0,
             pressed_jump: false,
             pressed_shoot: false,
             move_left: false,
@@ -135,6 +138,17 @@ impl World {
     pub fn update(&mut self, dt: f32) {
         // Increment client tick for clock synchronization
         self.client_tick = self.client_tick.wrapping_add(1);
+
+        // Debug: F11 key to manually reset clock sync
+        if is_key_pressed(KeyCode::F11) {
+            self.client_tick = 0;
+            self.server_tick_offset = 0;
+            self.clock_offset_ms = 0;
+            self.last_server_tick = 0;
+            self.last_server_time_ms = 0;
+            self.last_acked_server_tick = 0;
+            println!("Manual clock sync reset (F11)");
+        }
 
         // Run transition check AFTER bullet-vs-enemy collision so bullets
         // can hit enemies on the frame they're fired, even if the player
@@ -200,15 +214,34 @@ impl World {
         let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
         level.draw();
 
-        // Remote players: interpolated when available, raw fallback otherwise.
-        for (id, nemesis) in &self.other_players {
-            if nemesis.coords == self.current_coords
-                && let Some(interp) = self.other_interp.get(id)
-                && let Some((ix, iy, idir)) = interp.interpolate(nemesis)
-            {
-                crate::render::draw_nemesis_at(nemesis, ix, iy, idir);
-            } else if nemesis.coords == self.current_coords {
-                nemesis.draw();
+        // Remote players: tick-based interpolation with jitter buffer.
+        // Compute server tick estimate and target render tick.
+        let server_tick_estimate = self.client_tick as i64 + self.server_tick_offset;
+        if server_tick_estimate > 0 {
+            let server_tick_estimate = server_tick_estimate as u64;
+            let target_tick = server_tick_estimate.saturating_sub(INTERPOLATION_DELAY_TICKS as u64);
+
+            for (id, nemesis) in &self.other_players {
+                if nemesis.coords == self.current_coords
+                    && let Some(interp) = self.other_interp.get(id)
+                    && let Some((ix, iy, idir)) = interp.interpolate_at_tick(
+                        nemesis,
+                        target_tick,
+                        interp.last_known_server_tick,
+                        interp.last_known_arrival,
+                    )
+                {
+                    crate::render::draw_nemesis_at(nemesis, ix, iy, idir);
+                } else if nemesis.coords == self.current_coords {
+                    nemesis.draw();
+                }
+            }
+        } else {
+            // No clock sync yet: fall back to raw positions
+            for nemesis in self.other_players.values() {
+                if nemesis.coords == self.current_coords {
+                    nemesis.draw();
+                }
             }
         }
 

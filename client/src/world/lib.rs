@@ -47,6 +47,7 @@ fn handle_death(world: &mut World) {
     world.clock_offset_ms = 0;
     world.last_server_tick = 0;
     world.last_server_time_ms = 0;
+    world.last_acked_server_tick = 0;
     load_current_level(world);
 }
 
@@ -63,6 +64,7 @@ fn load_current_level(world: &mut World) {
     world.clock_offset_ms = 0;
     world.last_server_tick = 0;
     world.last_server_time_ms = 0;
+    world.last_acked_server_tick = 0;
     // Reset sticky edges to avoid carry-over from previous room
     world.jump_sticky = 0;
     world.shoot_sticky = 0;

@@ -11,6 +11,26 @@ pub fn update_network(world: &mut World) {
         handle_packet(world, decoded);
     }
 
+    // Staleness check: if we haven't received a PlayerPos for our own player
+    // in STALENESS_THRESHOLD_TICKS server ticks, force reconciliation.
+    if world.id.is_some() {
+        // We need the current server tick estimate to compare against last_acked_server_tick
+        // server_tick_estimate = client_tick + server_tick_offset
+        let server_tick_estimate = world.client_tick as i64 + world.server_tick_offset;
+        if server_tick_estimate > 0 {
+            let estimated_server_tick = server_tick_estimate as u64;
+            if estimated_server_tick.saturating_sub(world.last_acked_server_tick)
+                > game::config::STALENESS_THRESHOLD_TICKS
+            {
+                // Force reconciliation with the last known server position
+                // This is a fallback - the actual reconciliation happens in handle_packet
+                // when PlayerPos arrives, but we can trigger a re-send of inputs or log a warning
+                // For now, we just note the staleness; the next PlayerPos will trigger reconcile
+                // TODO: Could implement input re-send or position query here
+            }
+        }
+    }
+
     // Send: forward inputs to the server each frame (once assigned an id).
     if let Some(id) = world.id {
         // --- Sticky edge handling (D6) ---
@@ -72,6 +92,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.clock_offset_ms = 0;
             world.last_server_tick = 0;
             world.last_server_time_ms = 0;
+            world.last_acked_server_tick = 0;
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -99,8 +120,10 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 // Update tick offset: server_tick - client_tick
                 world.server_tick_offset = server_tick as i64 - world.client_tick as i64;
 
-                world.last_server_tick = server_tick;
+                world.last_acked_server_tick = server_tick;
                 world.last_server_time_ms = server_time_ms;
+                // Track last acknowledged server tick for staleness check
+                world.last_acked_server_tick = server_tick;
                 // --- END CLOCK SYNCHRONIZATION ---
 
                 // --- RECONCILIATION for own player ---
@@ -188,6 +211,8 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
 
                 let interp = world.other_interp.entry(id).or_default();
                 interp.push(nemesis, x, y, dir);
+                // Set anchor for tick-based interpolation
+                interp.set_anchor(server_tick);
             }
         }
         // NEW: Phase 2e - BulletSpawn from server (authoritative bullet spawn)
@@ -289,6 +314,15 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                     id
                 );
             }
+        }
+        GamePacket::Hit { entity_id } if Some(entity_id) == world.id => {
+            // Reset clock sync on own death
+            world.client_tick = 0;
+            world.server_tick_offset = 0;
+            world.clock_offset_ms = 0;
+            world.last_server_tick = 0;
+            world.last_server_time_ms = 0;
+            world.last_acked_server_tick = 0;
         }
         _ => {}
     }

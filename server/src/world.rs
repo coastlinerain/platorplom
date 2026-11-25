@@ -259,6 +259,15 @@ impl ServerWorld {
         self.start_time.elapsed().as_millis() as u64
     }
 
+    /// Get current wall-clock time in milliseconds since UNIX_EPOCH.
+    /// Used for clock synchronization with clients (NTP-style offset).
+    pub fn wall_time_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
     /// Raycast horizontal bullet path against alive enemies in the given room.
     /// Returns (spawn_x, spawn_y, hit_enemy_id).
     /// Bullet spawns from (origin_x, origin_y) and travels horizontally in `dir` up to 400px.

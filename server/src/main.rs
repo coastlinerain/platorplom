@@ -2,7 +2,166 @@ use crossbeam_channel::Sender;
 use laminar::{Packet, Socket, SocketEvent};
 use metroidvania_server::ServerWorld;
 use protocol::GamePacket;
-use std::{collections::HashMap, net::SocketAddr, time::Instant};
+use serde_json::json;
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
+
+fn log_packet(dir: &str, packet: &GamePacket) {
+    if std::env::var("RUSTVANIA_PACKET_LOG").is_err() {
+        return;
+    }
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let entry = json!({
+        "ts_ms": ts_ms,
+        "dir": dir,
+        "type": packet_type_name(packet),
+        "id": packet_id(packet),
+        "seq": packet_seq(packet),
+        "server_tick": packet_server_tick(packet),
+        "server_time_ms": packet_server_time_ms(packet),
+        "key_fields": packet_key_fields(packet),
+    });
+    println!("{}", entry);
+}
+
+fn packet_type_name(p: &GamePacket) -> &'static str {
+    match p {
+        GamePacket::JoinRequest => "JoinRequest",
+        GamePacket::JoinResponse { .. } => "JoinResponse",
+        GamePacket::PlayerInput { .. } => "PlayerInput",
+        GamePacket::PlayerPos { .. } => "PlayerPos",
+        GamePacket::Leave { .. } => "Leave",
+        GamePacket::Hit { .. } => "Hit",
+        GamePacket::BulletSpawn { .. } => "BulletSpawn",
+        GamePacket::EnemyDied { .. } => "EnemyDied",
+        GamePacket::EnemyStateRequest { .. } => "EnemyStateRequest",
+        GamePacket::EnemyStateResponse { .. } => "EnemyStateResponse",
+    }
+}
+
+fn packet_id(p: &GamePacket) -> Option<u8> {
+    match p {
+        GamePacket::JoinResponse { assigned_id } => Some(*assigned_id),
+        GamePacket::PlayerInput { id, .. } => Some(*id),
+        GamePacket::PlayerPos { id, .. } => Some(*id),
+        GamePacket::Leave { id } => Some(*id),
+        GamePacket::Hit { entity_id } => Some(*entity_id),
+        GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
+        GamePacket::EnemyDied {
+            enemy_id,
+            room_x: _,
+            room_y: _,
+        } => Some(*enemy_id),
+        _ => None,
+    }
+}
+
+fn packet_seq(p: &GamePacket) -> Option<u16> {
+    match p {
+        GamePacket::PlayerInput { seq, .. } => Some(*seq),
+        GamePacket::PlayerPos { last_seq, .. } => Some(*last_seq),
+        GamePacket::BulletSpawn { seq, .. } => Some(*seq),
+        _ => None,
+    }
+}
+
+fn packet_server_tick(p: &GamePacket) -> Option<u64> {
+    match p {
+        GamePacket::PlayerPos { server_tick, .. } => Some(*server_tick),
+        _ => None,
+    }
+}
+
+fn packet_server_time_ms(p: &GamePacket) -> Option<u64> {
+    match p {
+        GamePacket::PlayerPos { server_time_ms, .. } => Some(*server_time_ms),
+        _ => None,
+    }
+}
+
+fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
+    match p {
+        GamePacket::JoinRequest => json!({}),
+        GamePacket::JoinResponse { assigned_id } => json!({ "assigned_id": assigned_id }),
+        GamePacket::PlayerInput {
+            id,
+            level_x,
+            level_y,
+            move_left,
+            move_right,
+            jump,
+            shoot,
+            seq,
+        } => json!({
+            "id": id,
+            "level": [level_x, level_y],
+            "move_left": move_left,
+            "move_right": move_right,
+            "jump": jump,
+            "shoot": shoot,
+            "seq": seq,
+        }),
+        GamePacket::PlayerPos {
+            id,
+            x,
+            y,
+            dir,
+            level_x,
+            level_y,
+            last_seq,
+            server_tick,
+            server_time_ms,
+        } => json!({
+            "id": id,
+            "pos": [x, y],
+            "dir": dir,
+            "level": [level_x, level_y],
+            "last_seq": last_seq,
+            "server_tick": server_tick,
+            "server_time_ms": server_time_ms,
+        }),
+        GamePacket::Leave { id } => json!({ "id": id }),
+        GamePacket::Hit { entity_id } => json!({ "entity_id": entity_id }),
+        GamePacket::BulletSpawn {
+            bullet_id,
+            x,
+            y,
+            dir,
+            owner_id,
+            seq,
+        } => json!({
+            "bullet_id": bullet_id,
+            "pos": [x, y],
+            "dir": dir,
+            "owner_id": owner_id,
+            "seq": seq,
+        }),
+        GamePacket::EnemyDied {
+            enemy_id,
+            room_x,
+            room_y,
+        } => json!({
+            "enemy_id": enemy_id,
+            "room": [room_x, room_y],
+        }),
+        GamePacket::EnemyStateRequest { room_x, room_y } => json!({ "room": [room_x, room_y] }),
+        GamePacket::EnemyStateResponse {
+            room_x,
+            room_y,
+            enemies,
+        } => json!({
+            "room": [room_x, room_y],
+            "enemy_count": enemies.len(),
+        }),
+    }
+}
 
 fn main() {
     let mut socket = Socket::bind("127.0.0.1:12345").unwrap();
@@ -34,6 +193,7 @@ fn main() {
                     let addr = packet.addr();
 
                     if let Ok(decoded) = postcard::from_bytes::<GamePacket>(packet.payload()) {
+                        log_packet("recv", &decoded);
                         match decoded {
                             GamePacket::JoinRequest => {
                                 let id = next_id;
@@ -44,6 +204,7 @@ fn main() {
 
                                 let response = GamePacket::JoinResponse { assigned_id: id };
                                 let bytes = postcard::to_allocvec(&response).unwrap();
+                                log_packet("sent", &response);
                                 let _ =
                                     packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
                                 println!("Player {} joined from {}", id, addr);
@@ -90,10 +251,9 @@ fn main() {
 
                                 for (&player_addr, &player_id) in addrs.iter() {
                                     if player_id != id {
-                                        let bytes = postcard::to_allocvec(&GamePacket::Hit {
-                                            entity_id: id,
-                                        })
-                                        .unwrap();
+                                        let hit_packet = GamePacket::Hit { entity_id: id };
+                                        let bytes = postcard::to_allocvec(&hit_packet).unwrap();
+                                        log_packet("sent", &hit_packet);
                                         let _ = packet_sender.send(Packet::reliable_ordered(
                                             player_addr,
                                             bytes,
@@ -111,6 +271,7 @@ fn main() {
                                     enemies,
                                 };
                                 let bytes = postcard::to_allocvec(&response).unwrap();
+                                log_packet("sent", &response);
                                 let _ =
                                     packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
                             }
@@ -144,7 +305,7 @@ fn main() {
                 for (&player_id, player) in world.players() {
                     let (lx, ly) = world.coords().get(&player_id).copied().unwrap_or((0, 0));
                     let last_seq = world.max_seq().get(&player_id).copied().unwrap_or(0);
-                    let bytes = postcard::to_allocvec(&GamePacket::PlayerPos {
+                    let pos_packet = GamePacket::PlayerPos {
                         id: player_id,
                         x: player.pos.x,
                         y: player.pos.y,
@@ -153,9 +314,10 @@ fn main() {
                         level_y: ly,
                         last_seq,
                         server_tick: world.current_tick(),
-                        server_time_ms: world.elapsed_ms(),
-                    })
-                    .unwrap();
+                        server_time_ms: world.wall_time_ms(),
+                    };
+                    let bytes = postcard::to_allocvec(&pos_packet).unwrap();
+                    log_packet("sent", &pos_packet);
                     let _ = packet_sender.send(Packet::unreliable(dest_addr, bytes));
                 }
             }
@@ -171,6 +333,7 @@ fn main() {
                     seq: shot.seq,
                 };
                 let bytes = postcard::to_allocvec(&packet).unwrap();
+                log_packet("sent", &packet);
                 for &dest_addr in addrs.keys() {
                     let _ = packet_sender.send(Packet::reliable_ordered(
                         dest_addr,
@@ -188,6 +351,7 @@ fn main() {
                     room_y: death.room_y,
                 };
                 let bytes = postcard::to_allocvec(&packet).unwrap();
+                log_packet("sent", &packet);
                 for (&dest_addr, &player_id) in &addrs {
                     let player_coords = world.coords().get(&player_id).copied().unwrap_or((0, 0));
                     if player_coords == (death.room_x, death.room_y) {
@@ -214,6 +378,7 @@ fn main() {
 fn broadcast_leave(addrs: &HashMap<SocketAddr, u8>, sender: &Sender<Packet>, dropped_id: u8) {
     let leave_msg = GamePacket::Leave { id: dropped_id };
     let bytes = postcard::to_allocvec(&leave_msg).expect("Error serializing Leave");
+    log_packet("sent", &leave_msg);
 
     for &target_addr in addrs.keys() {
         let packet = Packet::reliable_ordered(target_addr, bytes.clone(), None);

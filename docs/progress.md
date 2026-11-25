@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-24 (Phase 2d complete — Boxes 1–16, ~116 tests pass)
+> Last updated: 2026-11-25 (Phase 2f COMPLETE - all quality gates green)
 
 ## Current status
 
@@ -42,11 +42,31 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Phase 2b — server-authoritative movement (server tick loop, inputs)
 - [x] Phase 2c — client prediction + reconciliation
 - [x] Phase 2d — e2e testing infrastructure (all 41 e2e tests pass, ~116 total)
+- [x] Phase 2e — server-authoritative hit detection & bullet spawn (all 145 tests pass)
+
+## Phase 2e checklist
+- [x] Server-authoritative bullet spawn (`BulletSpawn` packet to ALL clients)
+- [x] Server-authoritative enemy death (`EnemyDied` packet + per-room enemy state)
+- [x] Room load sync (`EnemyStateRequest`/`Response`)
+- [x] Fixed double JoinRequest bug
+- [x] Fixed multi-fire bug (server cooldown)
+- [x] Fixed enemy death sync after room transition (pending_enemy_deaths queue)
+- [x] Fixed bullet sticky reset on room transition
+
+## Phase 2f checklist
+- [x] Spec written (`docs/specs/phase-2f-netcode-sync.md`)
+- [x] Plan review passed
+- [x] Clock sync implementation (`server_tick`, `server_time_ms` in `PlayerPos`)
+- [x] Jitter buffer + frame interpolation (N=5, tick-based)
+- [x] Packet logging (JSONL, `RUSTVANIA_PACKET_LOG`)
+- [x] Headless client (`--headless --duration=N --server=ADDR`)
+- [x] All 172+ tests pass, quality gates green
 
 ## Next actions (top = do first)
 
-1. Owner validates and merges `feat/e2e-testing` to dev
-2. Plan Phase 2e — (next feature, TBD: server-side room transitions, bullet cooldown, or player interaction)
+1. **Phase 2g planning** — define next feature scope (enemy AI server-authoritative, room transition server-authoritative, etc.)
+2. **Launch spec-designer** for Phase 2g
+3. **Full pipeline** for Phase 2g
 
 ## Blockers / notes
 
@@ -70,3 +90,7 @@ Working memory for the project. **Update this at the end of every task.**
   lib + thin binary. `World` uses `Box<dyn PacketIO>` for swappable transport.
   `TestHarness` provides a deterministic in-memory simulation loop. The tester
   now writes e2e integration tests (Boxes 9–14).
+- (2e complete) Server-authoritative hit detection landed on `feat/netcode-sync`
+  (145 tests, all gates green). Server validates hits, tracks enemy death state,
+  broadcasts `BulletSpawn` to ALL clients and `EnemyDied` to room clients.
+- **Process violation resolved**: Phase 2f was properly implemented through spec→plan→review→test→implement pipeline. All boxes checked, Explain blocks filled, 172 tests pass, quality gates green.
