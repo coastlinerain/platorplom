@@ -12,6 +12,9 @@ pub enum GamePacket {
         level_x: u8,
         level_y: u8,
         last_seq: u16,
+        // Phase 2f: server clock for client synchronization
+        server_tick: u64,
+        server_time_ms: u64,
     },
     Leave {
         id: u8,

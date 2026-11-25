@@ -39,6 +39,9 @@ pub struct ServerWorld {
     // NEW: Phase 2e
     enemies: HashMap<(u8, u8), Vec<EnemyState>>, // key: (room_x, room_y)
     next_bullet_id: u16,
+    // NEW: Phase 2f - server clock for synchronization
+    current_tick: u64,
+    start_time: std::time::Instant,
 }
 
 impl ServerWorld {
@@ -77,6 +80,8 @@ impl ServerWorld {
             shoot_cooldown: HashMap::new(),
             enemies,
             next_bullet_id: 0,
+            current_tick: 0,
+            start_time: std::time::Instant::now(),
         }
     }
 
@@ -240,7 +245,18 @@ impl ServerWorld {
             }
         }
 
+        self.current_tick += 1;
         (bullet_spawns, enemy_deaths)
+    }
+
+    /// Get current server tick number.
+    pub fn current_tick(&self) -> u64 {
+        self.current_tick
+    }
+
+    /// Get elapsed time since server start in milliseconds.
+    pub fn elapsed_ms(&self) -> u64 {
+        self.start_time.elapsed().as_millis() as u64
     }
 
     /// Raycast horizontal bullet path against alive enemies in the given room.

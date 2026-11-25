@@ -152,6 +152,8 @@ fn main() {
                         level_x: lx,
                         level_y: ly,
                         last_seq,
+                        server_tick: world.current_tick(),
+                        server_time_ms: world.elapsed_ms(),
                     })
                     .unwrap();
                     let _ = packet_sender.send(Packet::unreliable(dest_addr, bytes));

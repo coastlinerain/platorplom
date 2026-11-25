@@ -28,6 +28,8 @@ fn round_trip_player_pos() {
         level_x: 0,
         level_y: 255,
         last_seq: 0,
+        server_tick: 0,
+        server_time_ms: 0,
     });
     round_trip(GamePacket::PlayerPos {
         id: 255,
@@ -37,6 +39,8 @@ fn round_trip_player_pos() {
         level_x: 255,
         level_y: 255,
         last_seq: 0,
+        server_tick: 100,
+        server_time_ms: 1667,
     });
     round_trip(GamePacket::PlayerPos {
         id: 7,
@@ -46,6 +50,8 @@ fn round_trip_player_pos() {
         level_x: 3,
         level_y: 2,
         last_seq: 42,
+        server_tick: 12345,
+        server_time_ms: 67890,
     });
 }
 

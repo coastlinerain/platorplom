@@ -56,6 +56,12 @@ pub struct World {
     pub confirmed_bullets: HashMap<u16, ConfirmedBullet>, // seq -> confirmed bullet data
     // Enemy deaths received before enemy was spawned (race condition fix)
     pub pending_enemy_deaths: HashSet<u8>,
+    // --- NEW: Phase 2f - Clock synchronization ---
+    pub client_tick: u64,
+    pub server_tick_offset: i64, // server_tick - client_tick
+    pub clock_offset_ms: i64,    // server_time_ms - local_time_ms (estimated)
+    pub last_server_tick: u64,
+    pub last_server_time_ms: u64,
 }
 
 impl fmt::Debug for World {
@@ -113,6 +119,12 @@ impl World {
             spawned_bullet_ids: HashSet::new(),
             confirmed_bullets: HashMap::new(),
             pending_enemy_deaths: HashSet::new(),
+            // NEW: Phase 2f - Clock synchronization
+            client_tick: 0,
+            server_tick_offset: 0,
+            clock_offset_ms: 0,
+            last_server_tick: 0,
+            last_server_time_ms: 0,
             pressed_jump: false,
             pressed_shoot: false,
             move_left: false,
@@ -121,6 +133,9 @@ impl World {
     }
 
     pub fn update(&mut self, dt: f32) {
+        // Increment client tick for clock synchronization
+        self.client_tick = self.client_tick.wrapping_add(1);
+
         // Run transition check AFTER bullet-vs-enemy collision so bullets
         // can hit enemies on the frame they're fired, even if the player
         // crosses a room boundary on the same frame.

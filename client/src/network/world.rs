@@ -66,6 +66,12 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.spawned_bullet_ids.clear();
             world.confirmed_bullets.clear();
             world.pending_enemy_deaths.clear();
+            // Reset clock sync fields on new connection
+            world.client_tick = 0;
+            world.server_tick_offset = 0;
+            world.clock_offset_ms = 0;
+            world.last_server_tick = 0;
+            world.last_server_time_ms = 0;
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -76,8 +82,27 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             level_x,
             level_y,
             last_seq,
+            server_tick,
+            server_time_ms,
         } => {
             if Some(id) == world.id {
+                // --- PHASE 2f: CLOCK SYNCHRONIZATION ---
+                // Update clock offset using server timestamp
+                let local_time_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+
+                // Calculate clock offset: server_time - local_time
+                world.clock_offset_ms = server_time_ms as i64 - local_time_ms;
+
+                // Update tick offset: server_tick - client_tick
+                world.server_tick_offset = server_tick as i64 - world.client_tick as i64;
+
+                world.last_server_tick = server_tick;
+                world.last_server_time_ms = server_time_ms;
+                // --- END CLOCK SYNCHRONIZATION ---
+
                 // --- RECONCILIATION for own player ---
                 // Guard: only reconcile when the server's reported room matches
                 // the client's current room AND the server position is not inside

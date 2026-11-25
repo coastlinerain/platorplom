@@ -41,6 +41,12 @@ fn handle_death(world: &mut World) {
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
     world.pending_enemy_deaths.clear();
+    // Reset clock sync on death
+    world.client_tick = 0;
+    world.server_tick_offset = 0;
+    world.clock_offset_ms = 0;
+    world.last_server_tick = 0;
+    world.last_server_time_ms = 0;
     load_current_level(world);
 }
 
@@ -51,6 +57,12 @@ fn load_current_level(world: &mut World) {
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
     world.pending_enemy_deaths.clear();
+    // Reset clock sync on room transition
+    world.client_tick = 0;
+    world.server_tick_offset = 0;
+    world.clock_offset_ms = 0;
+    world.last_server_tick = 0;
+    world.last_server_time_ms = 0;
     // Reset sticky edges to avoid carry-over from previous room
     world.jump_sticky = 0;
     world.shoot_sticky = 0;
