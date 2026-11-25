@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-25 (Phase 2g COMPLETE — all tests green, fmt/clippy clean, CI runs tests under Xvfb)
+> Last updated: 2026-11-25 (Phase 2g COMPLETE — code review APPROVED, QA APPROVED; all tests green, fmt/clippy clean, CI runs tests under Xvfb)
 
 ## Current status
 
@@ -78,13 +78,24 @@ Working memory for the project. **Update this at the end of every task.**
 
 ## Next actions (top = do first)
 
-1. **Phase 2g code review + QA** — run the pipeline `reviewer` (code mode) and
-   `qa` passes on the Phase 2g diff; then ask owner before push/PR.
-2. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
+1. **Ask owner before push/PR** — Phase 2g branch is complete (10 commits, all
+   gates green, code review + QA APPROVED). Owner merges.
+2. **QA follow-ups (deferred, non-blocking)** — (a) extract the accumulator into
+   a shared `FixedTimestep` helper so the `steps < MAX` spiral-of-death guard is
+   actually exercised (currently the e2e `simulate_frame` only tests the clamp,
+   not the guard — QA m2); (b) feed the camera the interpolated render position
+   rather than the raw sim position to avoid camera micro-stutter (QA m5, folds
+   into netcode-smoothness); (c) snap `prev_player_*` after reconciliation, same
+   root cause as the teleport-lerp glitch (QA n3).
+3. **Process: subagent shell access** — `tester`/`implementer`/`reviewer`/`qa`
+   had their `shell` tool denied, so RED tests were never executed and the
+   red→green signal broke (QA M1). Decide: grant read-only shell, or add an
+   orchestrator gate that runs `cargo test` right after the tester finishes.
+4. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
    drop "30 FPS floor" wording (done in spec/plan); add `GLOSSARY.md` (done).
-3. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+5. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English (deferred from 2g).
-4. **Follow-up: netcode smoothness review** — owner wants a seamless online
+6. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
