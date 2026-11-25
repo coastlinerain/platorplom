@@ -19,3 +19,16 @@ pub const INTERPOLATION_DELAY_TICKS: u8 = 5;
 /// Maximum number of server ticks a client can be behind before forcing
 /// a reconciliation (staleness heuristic).
 pub const STALENESS_THRESHOLD_TICKS: u64 = 5;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Box 1 (AC1): fixed-timestep constants required by the accumulator
+    /// pattern and the headless hybrid sleep + busy-wait loop.
+    #[test]
+    fn fixed_timestep_constants() {
+        assert_eq!(MAX_ACCUMULATED_FRAMES, 5);
+        assert_eq!(HEADLESS_BUSY_WAIT_MS, 1);
+    }
+}

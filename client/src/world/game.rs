@@ -281,3 +281,222 @@ impl World {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network::packet_io::PacketIO;
+    use game::config::{MAX_ACCUMULATED_FRAMES, TICK_HZ, VELOCIDAD};
+    use game::maps::Map;
+
+    /// Minimal PacketIO that does nothing — for unit tests that don't need network.
+    struct DummyPacketIO;
+
+    impl PacketIO for DummyPacketIO {
+        fn try_recv(&mut self) -> Option<protocol::GamePacket> {
+            None
+        }
+        fn send(&mut self, _packet: protocol::GamePacket) {}
+    }
+
+    fn make_test_world() -> World {
+        let world_data = Map::new();
+        World::new(world_data, Box::new(DummyPacketIO))
+    }
+
+    const TICK_DT: f32 = 1.0 / TICK_HZ as f32;
+
+    /// Box 2 (AC1): World::new initializes `prev_player_pos`/`prev_player_dir` to
+    /// the player's initial position/direction, so the first rendered frame has a
+    /// sane interpolation source.
+    #[test]
+    fn world_new_initializes_prev_player_state() {
+        let world = make_test_world();
+        assert_eq!(world.prev_player_pos, world.player.pos);
+        assert_eq!(world.prev_player_dir, world.player.dir);
+    }
+
+    /// Box 3: `update` stores the previous position/direction *before* simulating
+    /// the player, so `interpolated_player_pos/dir` can lerp prev → current.
+    #[test]
+    fn update_stores_previous_player_state() {
+        let mut world = make_test_world();
+        let before_pos = world.player.pos;
+        let before_dir = world.player.dir;
+
+        world.move_right = true;
+        world.update(TICK_DT);
+
+        assert_eq!(world.prev_player_pos, before_pos);
+        assert_eq!(world.prev_player_dir, before_dir);
+        // The player actually advanced, so prev != current after the tick.
+        assert!(world.player.pos.x > before_pos.x);
+    }
+
+    /// Box 8 (AC3): World::update receives exactly TICK_DT in the accumulator loop.
+    ///
+    /// We cannot intercept the `dt` argument directly, so we verify its observable
+    /// effect: with `move_right` held, a single `update(TICK_DT)` must advance the
+    /// player by exactly `VELOCIDAD * TICK_DT`. If update were called with the
+    /// variable render dt instead, the delta would differ.
+    #[test]
+    fn world_update_receives_fixed_tick_dt() {
+        let mut world = make_test_world();
+        world.move_right = true;
+
+        let before_x = world.player.pos.x;
+        world.update(TICK_DT);
+
+        let expected_dx = VELOCIDAD * TICK_DT;
+        let actual_dx = world.player.pos.x - before_x;
+        assert!(
+            (actual_dx - expected_dx).abs() < 0.001,
+            "update should advance player by exactly VELOCIDAD * TICK_DT = {:.6}, got {:.6}",
+            expected_dx,
+            actual_dx
+        );
+    }
+
+    /// Box 9 (AC9): Accumulator clamp — large frame_dt (1.0s) results in exactly
+    /// MAX_ACCUMULATED_FRAMES (5) steps, accumulator clamped to 5 * TICK_DT.
+    /// This test simulates the accumulator logic that will be in main.rs.
+    #[test]
+    fn accumulator_clamp_large_frame_dt() {
+        let mut world = make_test_world();
+        let large_frame_dt = 1.0_f32; // 1 second of lag
+        let mut accumulator = 0.0_f32;
+        let max_accumulator = MAX_ACCUMULATED_FRAMES as f32 * TICK_DT;
+
+        // Simulate one render frame with large frame_dt
+        accumulator += large_frame_dt;
+        if accumulator > max_accumulator {
+            accumulator = max_accumulator; // clamp
+        }
+
+        let mut sim_steps = 0u32;
+        while accumulator >= TICK_DT {
+            world.update(TICK_DT);
+            accumulator -= TICK_DT;
+            sim_steps += 1;
+        }
+
+        // Should execute exactly MAX_ACCUMULATED_FRAMES (5) steps
+        assert_eq!(sim_steps, MAX_ACCUMULATED_FRAMES, "should execute exactly 5 sim steps for 1s frame_dt");
+
+        // Accumulator should be clamped to max_accumulator - 5 * TICK_DT
+        // max_accumulator = 5 * TICK_DT, so after 5 steps: accumulator = 0
+        assert!((accumulator - 0.0).abs() < f32::EPSILON, "accumulator should be 0 after 5 steps");
+    }
+
+    /// Box 10 (AC4): interpolated_player_pos/dir(alpha) — lerp at 0.0, 0.5, 1.0.
+    /// Tests the pure interpolation helpers that will be added to World.
+    #[test]
+    fn interpolated_player_pos_and_dir_lerp() {
+        let mut world = make_test_world();
+
+        // Set up known positions for testing
+        let prev_pos = glam::Vec2::new(100.0, 200.0);
+        let curr_pos = glam::Vec2::new(200.0, 300.0);
+        let prev_dir = 0.0_f32;
+        let curr_dir = std::f32::consts::FRAC_PI_2; // π/2 = 90 degrees
+
+        world.prev_player_pos = prev_pos;
+        world.player.pos = curr_pos;
+        world.prev_player_dir = prev_dir;
+        world.player.dir = curr_dir;
+
+        // Test interpolated_player_pos
+        let pos_0 = world.interpolated_player_pos(0.0);
+        let pos_half = world.interpolated_player_pos(0.5);
+        let pos_1 = world.interpolated_player_pos(1.0);
+
+        // At alpha=0: should be prev_pos
+        assert!((pos_0.x - prev_pos.x).abs() < f32::EPSILON);
+        assert!((pos_0.y - prev_pos.y).abs() < f32::EPSILON);
+
+        // At alpha=0.5: should be midpoint
+        let expected_mid = prev_pos.lerp(curr_pos, 0.5);
+        assert!((pos_half.x - expected_mid.x).abs() < f32::EPSILON);
+        assert!((pos_half.y - expected_mid.y).abs() < f32::EPSILON);
+
+        // At alpha=1: should be curr_pos
+        assert!((pos_1.x - curr_pos.x).abs() < f32::EPSILON);
+        assert!((pos_1.y - curr_pos.y).abs() < f32::EPSILON);
+
+        // Test interpolated_player_dir
+        let dir_0 = world.interpolated_player_dir(0.0);
+        let dir_half = world.interpolated_player_dir(0.5);
+        let dir_1 = world.interpolated_player_dir(1.0);
+
+        // At alpha=0: should be prev_dir
+        assert!((dir_0 - prev_dir).abs() < f32::EPSILON);
+
+        // At alpha=0.5: should be midpoint (simple lerp)
+        let expected_dir_mid = prev_dir + (curr_dir - prev_dir) * 0.5;
+        assert!((dir_half - expected_dir_mid).abs() < f32::EPSILON);
+
+        // At alpha=1: should be curr_dir
+        assert!((dir_1 - curr_dir).abs() < f32::EPSILON);
+    }
+
+    /// Box 10 (AC4) extra: interpolation alpha is clamped to [0, 1], so an
+    /// out-of-range alpha (e.g. a large first `frame_dt`) does not extrapolate.
+    #[test]
+    fn interpolated_player_pos_clamps_alpha() {
+        let mut world = make_test_world();
+        world.prev_player_pos = glam::Vec2::new(0.0, 0.0);
+        world.player.pos = glam::Vec2::new(10.0, 10.0);
+
+        let at_neg = world.interpolated_player_pos(-1.0);
+        let at_over = world.interpolated_player_pos(2.0);
+
+        assert!((at_neg - glam::Vec2::new(0.0, 0.0)).length() < f32::EPSILON);
+        assert!((at_over - glam::Vec2::new(10.0, 10.0)).length() < f32::EPSILON);
+    }
+
+    /// Box 11 (AC10): client_tick increments once per sim tick (per `World::update`
+    /// call), not once per render frame.
+    #[test]
+    fn client_tick_increments_per_sim_tick() {
+        let mut world = make_test_world();
+        let max_accumulator = MAX_ACCUMULATED_FRAMES as f32 * TICK_DT;
+
+        // Three render frames with distinct dt (30/60/10 FPS).
+        let frame_dts: [f32; 3] = [1.0 / 30.0, 1.0 / 60.0, 1.0 / 10.0];
+        let mut accumulator = 0.0_f32;
+        let mut total_steps = 0u64;
+
+        for &frame_dt in &frame_dts {
+            let tick_before = world.client_tick;
+            accumulator += frame_dt;
+            if accumulator > max_accumulator {
+                accumulator = max_accumulator;
+            }
+
+            let mut steps_this_frame = 0u64;
+            while accumulator >= TICK_DT {
+                world.update(TICK_DT);
+                accumulator -= TICK_DT;
+                steps_this_frame += 1;
+            }
+
+            // client_tick advanced by exactly the number of sim steps this frame.
+            assert_eq!(
+                world.client_tick - tick_before,
+                steps_this_frame,
+                "client_tick must advance once per sim tick"
+            );
+            total_steps += steps_this_frame;
+        }
+
+        // Three render frames at 30/60/10 FPS sum to (1/30 + 1/60 + 1/10)s of
+        // simulated time → more than 3 sim steps. client_tick reflects sim steps,
+        // not the render-frame count (3).
+        assert!(
+            total_steps > 3,
+            "expected >3 sim steps across 3 render frames, got {}",
+            total_steps
+        );
+        assert_eq!(world.client_tick, total_steps);
+    }
+}

@@ -64,9 +64,17 @@ Working memory for the project. **Update this at the end of every task.**
 
 ## Next actions (top = do first)
 
-1. **Phase 2g planning** — define next feature scope (enemy AI server-authoritative, room transition server-authoritative, etc.)
-2. **Launch spec-designer** for Phase 2g
-3. **Full pipeline** for Phase 2g
+1. **Phase 2g fixed timestep** — spec approved, plan written + Box 2a (input
+   decoupling) added, plan re-review pending, RED tests written. Next: re-review
+   plan → create `feat/phase-2g-fixed-timestep` branch → implementer.
+2. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
+   drop "30 FPS floor" wording (done in spec/plan); add `GLOSSARY.md` (done).
+3. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+   `VELOCIDAD` and remaining Spanish comments → English (deferred from 2g).
+4. **Follow-up: netcode smoothness review** — owner wants a seamless online
+   experience; analyze interpolation/prediction smoothness (jitter buffer N,
+   `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
+   phase.
 
 ## Blockers / notes
 
@@ -94,3 +102,11 @@ Working memory for the project. **Update this at the end of every task.**
   (145 tests, all gates green). Server validates hits, tracks enemy death state,
   broadcasts `BulletSpawn` to ALL clients and `EnemyDied` to room clients.
 - **Process violation resolved**: Phase 2f was properly implemented through spec→plan→review→test→implement pipeline. All boxes checked, Explain blocks filled, 172 tests pass, quality gates green.
+- (2g in progress) Fixed-timestep spec + plan drafted. Grill with owner surfaced:
+  (a) the accumulator's job is deterministic sim for prediction/reconciliation,
+  NOT a render-floor guarantee — spec's "30 FPS floor" claim was mathematically
+  wrong (clamp=5 keeps full 60Hz sim down to 12 FPS render) and has been removed;
+  (b) `CLIENT_HZ` will rename to `RENDER_HZ`; (c) `GLOSSARY.md` created with
+  server/client tick + frame + netcode terms; (d) Spanish→English cleanup deferred
+  to its own task. Owner's stated goal: seamless online experience with an
+  authoritative server → recorded as a netcode-smoothness follow-up.
