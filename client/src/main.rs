@@ -1,17 +1,12 @@
-mod hud;
-
-use game::config::{HEADLESS_BUSY_WAIT_MS, MAX_ACCUMULATED_FRAMES, TICK_HZ};
-use game::fixed_timestep::FixedTimestep;
-use game::maps::Map;
+use game::config::{HEADLESS_BUSY_WAIT_MS, TICK_HZ};
+use game::state_machine::{AppEvent, AppState};
 use macroquad::prelude::*;
-use metroidvania_rust::network::logging::log_packet;
+use metroidvania_rust::app::{App, TransportFactory};
 use metroidvania_rust::network::packet_io::PacketIO;
-use metroidvania_rust::network::world::send_join_req;
-use metroidvania_rust::world::game::World;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-/// RealPacketIO wraps the laminar socket for production use.
+/// RealPacketIO wraps the laminar socket for the GUI path.
 struct RealPacketIO {
     sender: crossbeam_channel::Sender<laminar::Packet>,
     receiver: crossbeam_channel::Receiver<laminar::SocketEvent>,
@@ -23,7 +18,7 @@ impl PacketIO for RealPacketIO {
         match self.receiver.try_recv() {
             Ok(laminar::SocketEvent::Packet(p)) => {
                 if let Ok(decoded) = postcard::from_bytes::<protocol::GamePacket>(p.payload()) {
-                    log_packet("recv", &decoded);
+                    metroidvania_rust::network::logging::log_packet("recv", &decoded);
                     Some(decoded)
                 } else {
                     None
@@ -34,7 +29,7 @@ impl PacketIO for RealPacketIO {
     }
 
     fn send(&mut self, packet: protocol::GamePacket) {
-        log_packet("sent", &packet);
+        metroidvania_rust::network::logging::log_packet("sent", &packet);
         let bytes = postcard::to_allocvec(&packet).unwrap();
         let pkt = match &packet {
             protocol::GamePacket::JoinRequest | protocol::GamePacket::Hit { .. } => {
@@ -46,7 +41,9 @@ impl PacketIO for RealPacketIO {
     }
 }
 
-/// HeadlessPacketIO for running without a window (CI/testing).
+/// HeadlessPacketIO for running without rendering (CI/testing). Structurally
+/// identical to `RealPacketIO`; kept separate so the headless factory closure
+/// and the GUI factory closure each reference a concrete type.
 struct HeadlessPacketIO {
     sender: crossbeam_channel::Sender<laminar::Packet>,
     receiver: crossbeam_channel::Receiver<laminar::SocketEvent>,
@@ -58,7 +55,7 @@ impl PacketIO for HeadlessPacketIO {
         match self.receiver.try_recv() {
             Ok(laminar::SocketEvent::Packet(p)) => {
                 if let Ok(decoded) = postcard::from_bytes::<protocol::GamePacket>(p.payload()) {
-                    log_packet("recv", &decoded);
+                    metroidvania_rust::network::logging::log_packet("recv", &decoded);
                     Some(decoded)
                 } else {
                     None
@@ -69,7 +66,7 @@ impl PacketIO for HeadlessPacketIO {
     }
 
     fn send(&mut self, packet: protocol::GamePacket) {
-        log_packet("sent", &packet);
+        metroidvania_rust::network::logging::log_packet("sent", &packet);
         let bytes = postcard::to_allocvec(&packet).unwrap();
         let pkt = match &packet {
             protocol::GamePacket::JoinRequest | protocol::GamePacket::Hit { .. } => {
@@ -81,24 +78,93 @@ impl PacketIO for HeadlessPacketIO {
     }
 }
 
-fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
-    let mut socket = laminar::Socket::bind("0.0.0.0:0").unwrap();
-    let sender = socket.get_packet_sender();
-    let receiver = socket.get_event_receiver();
-    std::thread::spawn(move || socket.start_polling());
+/// Build a transport factory that binds a fresh ephemeral socket per join. The
+/// ephemeral-port bind is effectively infallible, so `.unwrap()` is an accepted,
+/// documented exception (see plan notes).
+fn make_transport_factory(server_addr: SocketAddr, headless: bool) -> TransportFactory {
+    Box::new(move || {
+        let mut socket = laminar::Socket::bind("0.0.0.0:0").unwrap();
+        let sender = socket.get_packet_sender();
+        let receiver = socket.get_event_receiver();
+        std::thread::spawn(move || socket.start_polling());
 
-    let io = HeadlessPacketIO {
-        sender,
-        receiver,
-        server_addr,
-    };
-    let mut boxed: Box<dyn PacketIO> = Box::new(io);
-    send_join_req(&mut *boxed);
+        if headless {
+            Box::new(HeadlessPacketIO {
+                sender,
+                receiver,
+                server_addr,
+            }) as Box<dyn PacketIO>
+        } else {
+            Box::new(RealPacketIO {
+                sender,
+                receiver,
+                server_addr,
+            }) as Box<dyn PacketIO>
+        }
+    })
+}
 
-    let world_data = Map::new();
-    let mut game_world = World::new(world_data, boxed);
+/// Map UI keys to `AppEvent`s based on the current state (menu navigation,
+/// cancel, pause/resume, quit). Returns `None` when no UI event this frame.
+fn sample_ui_event(state: AppState) -> Option<AppEvent> {
+    match state {
+        AppState::MainMenu => {
+            if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                Some(AppEvent::StartJoin)
+            } else if is_key_pressed(KeyCode::Q) {
+                Some(AppEvent::Quit)
+            } else {
+                None
+            }
+        }
+        AppState::Connecting => {
+            if is_key_pressed(KeyCode::Escape) {
+                Some(AppEvent::Cancel)
+            } else {
+                None
+            }
+        }
+        AppState::Playing => {
+            if is_key_pressed(KeyCode::P) {
+                Some(AppEvent::PauseRequested)
+            } else if is_key_pressed(KeyCode::Escape) {
+                Some(AppEvent::QuitToMenu)
+            } else if is_key_pressed(KeyCode::Q) {
+                Some(AppEvent::Quit)
+            } else {
+                None
+            }
+        }
+        AppState::Paused => {
+            if is_key_pressed(KeyCode::P) {
+                Some(AppEvent::ResumeRequested)
+            } else if is_key_pressed(KeyCode::Escape) {
+                Some(AppEvent::QuitToMenu)
+            } else if is_key_pressed(KeyCode::Q) {
+                Some(AppEvent::Quit)
+            } else {
+                None
+            }
+        }
+        AppState::Disconnected => {
+            if is_key_pressed(KeyCode::Enter) {
+                Some(AppEvent::Retry)
+            } else if is_key_pressed(KeyCode::Escape) {
+                Some(AppEvent::BackToMenu)
+            } else if is_key_pressed(KeyCode::Q) {
+                Some(AppEvent::Quit)
+            } else {
+                None
+            }
+        }
+        AppState::Quitting => None,
+    }
+}
 
-    let tick_dt = 1.0 / TICK_HZ as f32;
+/// Headless driver: reuse the same `App` + handshake as the GUI, never mapping
+/// pause (so it never sits in `Paused`), and quit on `Disconnected` or when the
+/// `--duration` elapses. Preserves the hybrid sleep + busy-wait pacing.
+fn run_headless(app: &mut App, duration_secs: u64) {
     let tick_interval = Duration::from_secs_f64(1.0 / TICK_HZ as f64);
     let max_ticks = if duration_secs > 0 {
         (duration_secs as f32 * TICK_HZ as f32) as u64
@@ -115,13 +181,23 @@ fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
     // each iteration, then sleep for the bulk of the interval and busy-wait the
     // last ~HEADLESS_BUSY_WAIT_MS for sub-millisecond precision (spec D2).
     let mut next_tick = Instant::now() + tick_interval;
+    let mut tick = 0u64;
 
-    for tick in 0..max_ticks {
-        game_world.update(tick_dt);
+    loop {
+        let now = Instant::now();
+        app.update(now);
 
-        // Periodic status log
-        if tick % (TICK_HZ as u64 * 5) == 0 && tick > 0 {
-            println!("Headless tick: {}", tick);
+        if app.is_quitting() {
+            break;
+        }
+        if app.state() == AppState::Disconnected {
+            app.dispatch(AppEvent::Quit, now);
+            break;
+        }
+
+        tick += 1;
+        if duration_secs > 0 && tick >= max_ticks {
+            break;
         }
 
         let now = Instant::now();
@@ -152,7 +228,7 @@ async fn main() {
         .find(|a| a.starts_with("--duration="))
         .and_then(|a| a.split('=').nth(1))
         .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0); // 0 = run until SIGINT (in headless, we'll use a large number)
+        .unwrap_or(0); // 0 = run until the app quits (headless: run until SIGINT)
 
     // Parse --server=ADDR
     let server_addr = args
@@ -160,83 +236,43 @@ async fn main() {
         .find(|a| a.starts_with("--server="))
         .and_then(|a| a.split('=').nth(1))
         .unwrap_or("127.0.0.1:12345")
-        .parse()
+        .parse::<SocketAddr>()
         .unwrap();
 
+    let factory = make_transport_factory(server_addr, headless);
+    let mut app = App::new(factory, headless);
+
     if headless {
-        run_headless(duration_secs, server_addr);
+        run_headless(&mut app, duration_secs);
         return;
     }
 
-    let mut socket = laminar::Socket::bind("0.0.0.0:0").unwrap();
-    let sender = socket.get_packet_sender();
-    let receiver = socket.get_event_receiver();
-    std::thread::spawn(move || socket.start_polling());
-
-    let io = RealPacketIO {
-        sender,
-        receiver,
-        server_addr,
-    };
-    let mut boxed: Box<dyn PacketIO> = Box::new(io);
-    send_join_req(&mut *boxed);
-
-    let world_data = Map::new();
-    let mut game_world = World::new(world_data, boxed);
-
-    // Fixed-timestep accumulator (spec D1): separate the simulation dt (fixed
-    // 1/60s) from the render dt (variable). `FixedTimestep` owns the
-    // accumulate → clamp → step → alpha logic (shared with the e2e tests).
-    let mut timestep = FixedTimestep::new(TICK_HZ, MAX_ACCUMULATED_FRAMES);
-    let tick_dt = 1.0 / TICK_HZ as f32;
-    let mut last_time = get_time();
-
     loop {
-        // Sample keyboard once per render frame and inject into World fields.
-        // (Input sampling must live here, not in World::update, so the sim is
-        // testable without a macroquad window.)
-        game_world.move_left = is_key_down(KeyCode::Left);
-        game_world.move_right = is_key_down(KeyCode::Right);
-        game_world.pressed_jump = is_key_pressed(KeyCode::Space);
-        game_world.pressed_shoot = is_key_pressed(KeyCode::Z);
+        let now = Instant::now();
 
-        // Debug: F11 key to manually reset clock sync (moved from World::update).
-        if is_key_pressed(KeyCode::F11) {
-            game_world.client_tick = 0;
-            game_world.server_tick_offset = 0;
-            game_world.clock_offset_ms = 0;
-            game_world.last_server_tick = 0;
-            game_world.last_server_time_ms = 0;
-            game_world.last_acked_server_tick = 0;
-            println!("Manual clock sync reset (F11)");
+        // UI keys → AppEvent (menu navigation, cancel, pause/resume, quit).
+        if let Some(event) = sample_ui_event(app.state()) {
+            app.dispatch(event, now);
         }
 
-        if is_key_pressed(KeyCode::P) {
-            println!("{:#?}", game_world);
-        }
-        clear_background(BLACK);
+        // Gameplay input, sampled once per render frame and injected into the
+        // live `World` (matches the Phase 2g input-boundary precedent).
+        let left = is_key_down(KeyCode::Left);
+        let right = is_key_down(KeyCode::Right);
+        let jump = is_key_pressed(KeyCode::Space);
+        let shoot = is_key_pressed(KeyCode::Z);
+        app.set_game_input(left, right, jump, shoot);
 
-        // Accumulate the real frame time (clamped to avoid the spiral of death).
-        let current_time = get_time();
-        let frame_dt = current_time - last_time;
-        last_time = current_time;
+        // Inject the viewport once per render frame BEFORE drawing.
+        app.set_viewport(screen_width(), screen_height());
 
-        // Inject the current viewport once per render frame (the camera does
-        // not query `screen_width`/`screen_height` itself, so `World::update`
-        // stays headless-testable). Must run BEFORE the accumulator loop below.
-        game_world
-            .camera
-            .set_viewport(screen_width(), screen_height());
+        app.update(now);
+        app.draw();
 
-        // Run 0..=MAX_ACCUMULATED_FRAMES fixed-dt simulation steps.
-        let steps = timestep.advance(frame_dt);
-        for _ in 0..steps {
-            game_world.update(tick_dt);
+        if app.is_quitting() {
+            break;
         }
 
-        // Interpolation alpha ∈ [0, 1): 0.0 = previous tick, ~1.0 = next tick.
-        game_world.draw(timestep.alpha());
-
-        next_frame().await
+        next_frame().await;
     }
 }
