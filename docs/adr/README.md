@@ -27,4 +27,5 @@ Index of decisions. Name files `NNNN-short-title.md`, zero-padded to 4 digits.
 
 | # | Title | Status |
 | --- | --- | --- |
-| 1 | [Networking model](0001-networking-model.md) | Proposed |
+| 1 | [Networking model](0001-networking-model.md) | Accepted |
+| 2 | [Game state machine](0002-game-state-machine.md) | Accepted |
