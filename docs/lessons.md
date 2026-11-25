@@ -403,7 +403,7 @@ Running journal of Rust concepts encountered while building Rustvania.
 ### Clock sync reset triggers (Join, Hit, Room Transition, F11) (2026-11-25)
 
 - **Where**: `client/src/network/world.rs` (JoinResponse, Hit), `client/src/world/lib.rs` (`load_current_level`), `client/src/world/game.rs` (`update` F11).
-- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `Hit` for own player (death/respawn teleport), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset).
+- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `Hit` for own player (death/respawn teleport), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset — removed in Phase 2h when `main.rs` was rewritten as a thin loop; the remaining triggers are JoinResponse, Hit, and room transition).
 - **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. `Hit` handling is now in both `handle_packet` (server-broadcast death) AND `handle_death` (client-initiated death) — keep both in sync.
 
 ### Phase 2f: Netcode Synchronization & Frame Alignment (2026-11-25)
@@ -514,3 +514,15 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `client/src/app.rs` (`update_playing`).
 - **What it is**: `now.saturating_duration_since(self.last_time)` returns `Duration::ZERO` when `now < self.last_time` instead of panicking like `duration_since`. The accumulator's `frame_dt` is therefore robust to the first frame after a state entry (where `last_time` is seeded to the entry instant) and to any non-monotonic clock wobble.
 - **Gotcha / insight**: It's the monotonic cousin of `checked_duration_since` (which returns `Option`). Prefer `saturating_` when you want a `Duration` to flow straight into arithmetic (`.as_secs_f64()`) without an `unwrap_or_default` step; prefer `checked_` when the "no valid duration" case needs a distinct branch.
+
+### `Option::take` — moving owned state out of an `Option` during a handoff (2026-11-25)
+
+- **Where**: `client/src/app.rs` (`enter_playing_from_join`).
+- **What it is**: `self.io.take()` moves the `Box<dyn PacketIO>` out of the `Option` field (replacing it with `None`) so it can be passed by value into `World::new(Map::new(), io)`. This is the ownership handoff that realizes the "lazy `World` + bind-per-join" design: the socket lives standalone in `self.io` during `Connecting`, then is *moved* (not cloned, not borrowed) into `World` on `Joined`.
+- **Gotcha / insight**: `Option::take()` needs `&mut self` (it mutates the `Option` to `None`) and returns `Option<T>`, so the caller still unwraps it (`.expect("a standalone socket must exist while Connecting")`). You cannot move a field out of a struct through `&self`; `take()` (or `mem::replace(&mut self.io, None)`) is the idiom for taking ownership out of a struct field.
+
+### Trait-object deref-coercion: `&mut Box<dyn T>` is not `&mut dyn T` (2026-11-25)
+
+- **Where**: `client/src/app.rs` (`update_connecting`).
+- **What it is**: `poll_join_response` takes `&mut dyn PacketIO`, but `match &mut self.io { Some(io) => ... }` binds `io: &mut Box<dyn PacketIO>`. `Box<dyn PacketIO>` does **not** implement `PacketIO` itself, so passing `io` directly fails to compile (`the trait PacketIO is not implemented for Box<dyn PacketIO>`). The fix is the explicit `io.as_mut()` (or `&mut **io`) to reach the `dyn PacketIO` inside the `Box`.
+- **Gotcha / insight**: Auto-deref applies to method *receivers* (`io.method()`) but not to *argument* position — a `&mut Box<dyn T>` passed to a `&mut dyn T` parameter needs an explicit `.as_mut()`/reborrow. The orchestrator caught this one by compiling code the shell-denied implementer could not; it is exactly the kind of error a working RED/GREEN loop is meant to surface early.
