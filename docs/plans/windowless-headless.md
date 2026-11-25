@@ -1,9 +1,10 @@
 # Windowless headless binary — Implementation Plan
 
-- Status: draft
+- Status: implemented
 - Spec: `docs/specs/windowless-headless.md`
 - Date: 2026-11-25
 - Branch: `refactor/windowless-headless`
+- Tests: 194 passed (8 ignored) — `cargo test --workspace` green without Xvfb
 
 ## Overview
 

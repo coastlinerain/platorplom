@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-25 (Phase 2h game-state-machine COMPLETE — 18 RED tests green, all 5 boxes + e2e helper done; code review APPROVE, QA advisory done; subagent shell perms fixed + verified)
+> Last updated: 2026-11-25 (windowless-headless refactor COMPLETE — 3 boxes done, both feature-gated binaries build; `cargo test --workspace` green WITHOUT Xvfb; CI drops Xvfb)
 
 ## Current status
 
@@ -87,12 +87,24 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Code review (reviewer) — APPROVE (7 MINORs, triaged); AC14 diff review clean (`protocol/`/`server/` untouched)
 - [x] QA + CI — AC15 gates green; QA advisory done (M2 socket leak + `.expect` restructure deferred as follow-ups)
 
+## Windowless headless binary checklist — refactor (`refactor/windowless-headless`)
+- [x] Spec + plan written (`docs/specs/windowless-headless.md`, `docs/plans/windowless-headless.md`)
+- [x] Box 1 — move `RealPacketIO`/`HeadlessPacketIO`/`make_transport_factory` into `client/src/network/transport.rs` (structs module-private, `pub fn` factory, re-exported from `lib.rs`)
+- [x] Box 2 — `[features] gui/headless/default=["gui"]` + two `[[bin]]` entries; new windowless `client/src/main_headless.rs` (plain `fn main()`, private `run_headless` moved verbatim)
+- [x] Box 3 — trim `main.rs` to GUI-only; rewire e2e spawn to `--bin rustvania-headless --features headless`; drop Xvfb from CI; `README.md` → `cargo run --bin metroidvania-rust`
+- [x] `cargo test --workspace` green WITHOUT Xvfb (194 passed, 8 ignored); `headless_timing` + `packet_log_rate` run the windowless binary
+- [x] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean; `cargo fmt --check --all` clean
+- [ ] Manual smoke: `cargo run --bin metroidvania-rust` opens the window (needs a display; binary compiles, not automatable here)
+
 ## Next actions (top = do first)
 
-1. **Push/PR (owner merges)** — Phase 2h game-state-machine is complete (all
+1. **Push/PR (owner merges)** — windowless-headless refactor is complete (3 boxes,
+   all gates green WITHOUT Xvfb). Push `refactor/windowless-headless` + open PR
+   to `dev`; owner merges.
+2. **Push/PR (owner merges)** — Phase 2h game-state-machine is complete (all
    gates green, code review APPROVE + QA done). Push `feat/game-state-machine`
    + open PR to `dev`; owner merges.
-2. **Phase 2h follow-ups (deferred)**:
+3. **Phase 2h follow-ups (deferred)**:
    - M2 — laminar poller thread + UDP socket leak on Leave/Retry/quit (needs a
      transport `Drop` that drains-then-stops + joins, plus a real-socket check).
    - `.expect()` restructure in `App::enter_playing_from_join` (pass `assigned_id`
@@ -102,12 +114,12 @@ Working memory for the project. **Update this at the end of every task.**
      clock-reset if wanted.
    - Paused-screen remote-animation wording (remote snapshots keep updating while
      paused; "rendering stays frozen" is slightly imprecise).
-3. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
+4. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
    render position (QA m5); (c) snap `prev_player_*` after reconciliation (QA n3).
-4. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
-5. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+5. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
+6. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English.
-6. **Follow-up: netcode smoothness review** — owner wants a seamless online
+7. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
@@ -189,3 +201,19 @@ Working memory for the project. **Update this at the end of every task.**
   clean; reviewer/qa additionally deny add/commit/checkout/stash to stay
   read-only). Verified: `cargo --version`, a compound `cargo test | tail`, and
   `rm` (correctly denied) all behave as expected.
+- (windowless-headless complete) Windowless-headless bin-split refactor landed on
+  `refactor/windowless-headless` (3 commits, 3 boxes, all gates green). Transport
+  moved into the lib (`client/src/network/transport.rs`, re-exported); two
+  feature-gated binaries (`metroidvania-rust` GUI + `rustvania-headless` plain
+  `fn main()`); e2e spawn rewired to `--bin rustvania-headless --features
+  headless`; Xvfb dropped from CI; `README.md` → `cargo run --bin
+  metroidvania-rust`. `cargo test --workspace` passes WITHOUT Xvfb (194 passed,
+  8 ignored). `protocol/`/`server/` untouched. Minor plan inconsistencies noted:
+  (a) Box 1's "add `use crate::network::logging::log_packet`" would be an unused
+  import if call sites stayed fully-qualified — resolved by importing the short
+  name and calling `log_packet(...)`; (b) the plan's T4 grep expects no
+  `make_transport_factory` in `main.rs`, but Box 3 *requires* the lib import +
+  call there — the real intent ("no local *definitions*") is satisfied (all four
+  definitions are gone; only the call site remains). Manual smoke T13
+  (`cargo run --bin metroidvania-rust` opens a window) is deferred to the owner
+  (needs a display); the binary compiles under `--all-targets --all-features`.
