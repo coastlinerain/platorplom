@@ -13,29 +13,16 @@
 // requested duration (a fixed-timestep loop must never finish early). Precise
 // sub-ms verification is better served by the packet-log timestamps (Box 14)
 // and by code review of the tick loop (Box 7).
+//
+// The headless client now genuinely connects (game-state-machine G8), so it runs
+// against a live server via the shared `e2e::run_headless_client` helper.
 
-use std::process::Command;
-use std::time::{Duration, Instant};
+use e2e::run_headless_client;
+use std::time::Duration;
 
 /// Run the headless client for `duration_secs` and return (stdout, elapsed).
 fn run_headless(duration_secs: u64) -> (String, Duration) {
-    let start = Instant::now();
-    // No server is required: the headless client runs its own tick loop and
-    // simply drops the JoinRequest/PlayerInput packets when nobody listens.
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "metroidvania-rust",
-            "--",
-            "--headless",
-            &format!("--duration={}", duration_secs),
-            "--server=127.0.0.1:9",
-        ])
-        .output()
-        .expect("failed to run headless client");
-    let elapsed = start.elapsed();
-    (String::from_utf8_lossy(&output.stdout).to_string(), elapsed)
+    run_headless_client(duration_secs, /*log_packets=*/ false)
 }
 
 #[test]
