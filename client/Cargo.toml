@@ -7,6 +7,21 @@ edition = "2024"
 name = "metroidvania_rust"
 path = "src/lib.rs"
 
+[features]
+gui = []
+headless = []
+default = ["gui"]
+
+[[bin]]
+name = "metroidvania-rust"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "rustvania-headless"
+path = "src/main_headless.rs"
+required-features = ["headless"]
+
 [dependencies]
 crossbeam-channel = "0.5.15"
 game = { path = "../game" }

@@ -153,7 +153,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 2 — Cargo feature/bin split + the windowless headless binary
 
-- [ ] done
+- [x] done
 - **Files**: edit `client/Cargo.toml`; create `client/src/main_headless.rs`.
 - **Change**:
   - Add the exact `[features]` and two `[[bin]]` blocks from the "Public API"
@@ -182,10 +182,26 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   and its entry point is a plain `fn main()` (T1, T2, T3).
 - **Test**: T1, T2, T3 (grep) + `cargo check --all-targets --all-features -p metroidvania-rust`.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Added `[features] gui/headless/default=["gui"]` plus two explicit
+    `[[bin]]` entries to `client/Cargo.toml`, and created
+    `client/src/main_headless.rs` with a plain `fn main()` (no `#[macroquad::main]`,
+    no `macroquad` import, no `async`). It parses `--duration=N`/`--server=ADDR`
+    exactly like the old headless path, builds `make_transport_factory(server_addr,
+    true)` + `App::new(factory, true)`, and calls a private `run_headless` moved
+    verbatim from `main.rs` (including its `/// Headless driver:` doc comment).
+  - Why: The whole point of the refactor — `#[macroquad::main]` opens a window
+    before `main()` runs, so headlessness has to live in a *separate* binary that
+    never links a macroquad entry point. The explicit `[[bin]]` entries (with
+    `required-features`) replace Cargo's implicit `src/main.rs` auto-detection and
+    gate each binary on its marker feature.
+  - Rust concepts: Cargo features as pure build-surface markers (no dependency
+    gating), multiple `[[bin]]` targets in one package, and a plain synchronous
+    `fn main()` as an alternative entry point to the macroquad async macro.
+  - Watch out: `main_headless.rs` must not reference any macroquad item — it
+    relies entirely on the macroquad-free `App::update`/`dispatch`/`state`/
+    `is_quitting` API. `main.rs` still compiles in this box (its private transport
+    + `--headless` flag remain); Box 3 removes them. `--duration=0` still means
+    "run until quit/SIGINT" (unchanged semantics).
 
 ### Box 3 — Trim `main.rs` to GUI-only, rewire e2e, drop Xvfb from CI
 
