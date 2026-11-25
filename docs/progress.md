@@ -101,10 +101,7 @@ Working memory for the project. **Update this at the end of every task.**
 1. **Push/PR (owner merges)** — windowless-headless refactor is complete (3 boxes,
    all gates green WITHOUT Xvfb). Push `refactor/windowless-headless` + open PR
    to `dev`; owner merges.
-2. **Push/PR (owner merges)** — Phase 2h game-state-machine is complete (all
-   gates green, code review APPROVE + QA done). Push `feat/game-state-machine`
-   + open PR to `dev`; owner merges.
-3. **Phase 2h follow-ups (deferred)**:
+2. **Phase 2h follow-ups (deferred)**:
    - M2 — laminar poller thread + UDP socket leak on Leave/Retry/quit (needs a
      transport `Drop` that drains-then-stops + joins, plus a real-socket check).
    - `.expect()` restructure in `App::enter_playing_from_join` (pass `assigned_id`
@@ -114,15 +111,22 @@ Working memory for the project. **Update this at the end of every task.**
      clock-reset if wanted.
    - Paused-screen remote-animation wording (remote snapshots keep updating while
      paused; "rendering stays frozen" is slightly imprecise).
-4. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
+3. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
    render position (QA m5); (c) snap `prev_player_*` after reconciliation (QA n3).
-5. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
-6. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+4. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
+5. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English.
-7. **Follow-up: netcode smoothness review** — owner wants a seamless online
+6. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
+7. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
+   - Collapse `RealPacketIO`/`HeadlessPacketIO` (now byte-identical in
+     `transport.rs`; decide whether the transport-level `headless` bool survives).
+   - Convert `.unwrap()` in lib code (`transport.rs` bind/`to_allocvec`,
+     `SocketAddr::parse`) to `.expect(...)` with a message / `Result`.
+   - T13 manual GUI smoke — run `cargo run --bin metroidvania-rust` once (needs a
+     display) to confirm the split didn't break the window path.
 
 ## Blockers / notes
 

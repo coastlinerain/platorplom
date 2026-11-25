@@ -1,6 +1,6 @@
 # Windowless headless binary
 
-- Status: draft
+- Status: implemented
 - Date: 2026-11-25
 - Branch: `refactor/windowless-headless`
 
@@ -173,7 +173,8 @@ unreliable, and the ephemeral-port bind behavior is unchanged.
 - `client/Cargo.toml` declares `gui`/`headless` features, `default = ["gui"]`,
   and two `[[bin]]` entries with the correct `required-features`.
 - `make_transport_factory` (and the two I/O structs) live in
-  `client/src/network/transport.rs`, are no longer in `main.rs`, and
+  `client/src/network/transport.rs`, are no longer *defined* in `main.rs` (the
+  GUI binary imports and calls `make_transport_factory` from the lib), and
   `make_transport_factory` is re-exported from `client/src/lib.rs`.
 - `e2e/src/process.rs` spawns `rustvania-headless` with `--features headless`
   and no `--headless` flag.
@@ -184,3 +185,17 @@ unreliable, and the ephemeral-port bind behavior is unchanged.
   (both binaries covered).
 - `cargo fmt --check --all` is clean.
 - No diff in `protocol/` or `server/`.
+
+## Follow-up
+
+- **Collapse `RealPacketIO`/`HeadlessPacketIO`** (QA MINOR): the two structs are
+  now byte-for-byte identical and co-located in `transport.rs`; the old "kept
+  separate so each factory closure references a concrete type" rationale no
+  longer holds (there is a single `make_transport_factory`). Collapsing them also
+  makes the transport-level `headless` bool redundant — decide whether that flag
+  survives at the transport layer or headlessness is solely an `App` concern.
+- **`.unwrap()` in library code** (QA NIT): `transport.rs` now lives in the lib,
+  so AGENTS.md's "prefer Result/Option over unwrap" binds more tightly. Convert
+  `postcard::to_allocvec(...).unwrap()` and `laminar::Socket::bind(...).unwrap()`
+  to `.expect("...")` with a message, and consider propagating a `Result` from
+  `make_transport_factory` for `SocketAddr::parse`.
