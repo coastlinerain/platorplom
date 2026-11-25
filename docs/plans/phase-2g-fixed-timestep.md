@@ -55,7 +55,7 @@ impl World {
 3. **Headless sleep timing (AC5)** — `run_headless` loop: 1000 ticks complete in 16.666s ±0.1s (hybrid sleep + busy-wait).
 4. **Accumulator clamp (AC9)** — Large `frame_dt` (e.g., 1.0s) results in exactly `MAX_ACCUMULATED_FRAMES` (5) steps, accumulator clamped to `5 * TICK_DT`.
 5. **`client_tick` increments per sim tick (AC10)** — Not per render frame; verify in accumulator loop.
-6. **Direction lerp boundary** — `interpolated_player_dir` handles -π/π crossing (simple lerp accepted for small per-tick changes; document limitation).
+6. **Direction lerp boundary** — `interpolated_player_dir` handles -π/π crossing (simple lerp accepted for small per-tick changes; document limitation). *Owned by Box 4 (Watch out) + Box 10.*
 
 ### Integration Tests
 7. **GUI at 30 FPS simulation (AC6)** — Simulate 30 FPS render: runs 2 sim steps/frame, `client_tick` advances 2/frame, render smooth.
@@ -83,7 +83,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 ### Box 2 — Add `prev_player_pos` and `prev_player_dir` to `World` (`client/src/world/game.rs`)
 
 - [ ] done
-- **Acceptance**: Fields added to `World` struct; initialized in `World::new()` to `player.pos` and `player.dir` (note: at this point `player.pos` is (0,0) — server assigns real position later via `PlayerPos`; first frame renders at origin briefly, which is acceptable).
+- **Acceptance**: Fields added to `World` struct; initialized in `World::new()` to `player.pos` and `player.dir` (note: `Player::new(0)` already sets `pos` to the spawn position `(100.0, 100.0)` and `dir = 1.0` — initialize `prev_player_*` to those same values so the first frame has no visual jump).
 - **Test**: Unit test compiles; `World::new()` initializes correctly.
 - **Explain**
   - What:
@@ -140,7 +140,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
   - What:
   - Why:
   - Rust concepts:
-  - Watch out:
+  - Watch out: Box 2a samples `is_key_pressed` once per **render frame**, but Box 5 then runs 0-5 `update` calls reading those fields. At <60 FPS render, one physical key press spans multiple sim ticks (each `update` sees `pressed_jump == true`). This is largely mitigated — `player.update` gates jump on `grounded`, and the server enforces a shoot cooldown — but do not assume per-tick edge fidelity.
 
 ### Box 6 — Implement hybrid sleep + busy-wait in headless loop (`client/src/main.rs`)
 
@@ -151,7 +151,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
   - What:
   - Why:
   - Rust concepts:
-  - Watch out:
+  - Watch out: Preserve the `"Headless client finished after {} ticks"` stdout line — `e2e/tests/headless_timing.rs` parses it to assert the exact tick count.
 
 ### Box 7 — Verify server catch-up loop and add comment (`server/src/main.rs`)
 
@@ -211,7 +211,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 ### Box 12 — Add integration test for headless timing (`e2e/tests/headless_timing.rs`)
 
 - [ ] done
-- **Acceptance**: Spawns headless client for 1000 ticks, measures wall time; asserts 16.566s < elapsed < 16.766s.
+- **Acceptance**: Spawns the headless client via `cargo run -- --headless --duration=N`. Two assertions: (1) at `N=2`, stdout's "finished after N ticks" line reports exactly `N * TICK_HZ` ticks; (2) at `N=8`, elapsed wall time is within `[N-0.4s, N+2.5s]` (fixed-timestep loop must never finish early; upper bound absorbs `cargo run` + window-open overhead).
 - **Test**: Integration test (AC5).
 - **Explain**
   - What:
@@ -244,7 +244,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 ### Box 15 — Add integration test for server catch-up under load (`e2e/tests/server_catchup.rs`)
 
 - [ ] done
-- **Acceptance**: Simulates event drain taking 10ms; verifies server catch-up runs 1 tick, sleeps remainder, no busy-spin.
+- **Acceptance**: Tests the invariant the catch-up loop relies on (the `while now >= next_tick` loop itself is in the server binary, verified by code review in Box 7): `ServerWorld::update` advances `current_tick` exactly once per call; a burst of queued inputs is fully consumed across a catch-up (none dropped); `current_tick` is monotonic under rapid back-to-back ticks.
 - **Test**: Integration test (AC7).
 - **Explain**
   - What:
@@ -288,7 +288,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 - **Input decoupling (Box 2a)**: `World::update` must never call `is_key_pressed`/`is_key_down` — macroquad input functions panic when there is no window, which breaks every unit test that calls `update` (Boxes 3, 8, 9, 11) and the e2e `gui_accumulator` test. The GUI loop in `main.rs` samples keyboard state once per render frame and writes it into `World`'s `move_left`/`move_right`/`pressed_jump`/`pressed_shoot` fields before calling `update`. Move the F11 debug reset to `main.rs` too (or drop it). Headless mode performs no sampling — its fields stay `false`.
 - **`client_tick`**: Already incremented in `World::update` (Phase 2f). Accumulator loop calls `update` once per sim tick → `client_tick` naturally increments at 60Hz.
 - **Input send**: `update_network` is called at end of `World::update` → automatically once per sim tick. No changes to `network/world.rs` needed.
-- **First frame edge case**: In GUI accumulator, first `frame_dt` may be large; clamp protects. `prev_player_pos` initialized to (0,0) in `World::new()`; server assigns real position via `PlayerPos` later — first few frames render at origin, acceptable.
+- **First frame edge case**: In GUI accumulator, first `frame_dt` may be large; clamp protects. `prev_player_pos` initialized to `player.pos` (spawn position `(100.0, 100.0)`) in `World::new()`, so the first rendered frame matches the current position with no jump.
 - **Alpha at 1.0**: When `accumulator == TICK_DT`, `alpha = 1.0` but loop runs another step immediately. Render with `alpha ≈ 1.0` shows position very close to next tick — acceptable. Clamp alpha to `< 1.0` if preferred.
 - **Direction lerp**: `prev_player_dir` and `player.dir` are angles (radians). Simple `lerp` works for small angles but may cross -π/π boundary. For Phase 2g, accept simple lerp; document in Box 4.
 - **Server loop**: No changes needed. Verification comment references spec decision D3 for traceability.
