@@ -1,9 +1,9 @@
 # Issue: Tick Rate Robustness - Fixed 60Hz Approximations
-- **Status**: open
+- **Status**: closed
 - **Type**: tech-debt
 - **Severity**: minor
 - **Created**: 2026-11-25
-- **Closed**: 
+- **Closed**: 2026-11-25 (resolved by Phase 2g — `docs/specs/phase-2g-fixed-timestep.md`)
 
 ## Description
 Both the server and client use a fixed 60Hz tick rate (`TICK_HZ = 60` in `game/src/config.rs`), but the current implementation relies on approximations:
@@ -23,20 +23,23 @@ The user wants: "run a loop of at least 30 iterations on a client always, and th
 - Clock sync (Phase 2f) assumes server ticks are regular but client ticks may not be
 
 ## Fix Plan
-- [ ] Analyze: Determine if this affects gameplay (prediction, reconciliation, interpolation)
-- [ ] Design: Choose approach — fixed timestep with accumulator on client? Minimum frame rate enforcement?
-- [ ] Server: Verify catch-up loop is sufficient or needs improvement
-- [ ] Client GUI: Implement fixed timestep with accumulator (separate sim dt from render dt)
-- [ ] Client Headless: Fix sleep duration to use sub-millisecond precision (park or spin)
-- [ ] Tests: Add timing tests to verify tick consistency
-- [ ] Verification: `cargo test`, `cargo clippy`, `cargo fmt`
+- [x] Analyze: Determine if this affects gameplay (prediction, reconciliation, interpolation)
+- [x] Design: Choose approach — fixed timestep with accumulator on client (Phase 2g spec)
+- [x] Server: Verify catch-up loop is sufficient (spec D3 — correct, documented)
+- [x] Client GUI: Implement fixed timestep with accumulator (separate sim dt from render dt)
+- [x] Client Headless: Fix sleep duration to use sub-millisecond precision (hybrid sleep + `spin_loop`)
+- [x] Tests: Add timing tests to verify tick consistency (headless_timing, packet_log_rate, gui_accumulator)
+- [x] Verification: `cargo test`, `cargo clippy`, `cargo fmt`
 
 ## Verification
-- [ ] cargo test
-- [ ] cargo clippy
-- [ ] cargo fmt
+- [x] cargo test
+- [x] cargo clippy
+- [x] cargo fmt
 
 ## Commits
-
+`feat/phase-2g-fixed-timestep` (8 commits): RED tests → plan fixes → accumulator/camera/headless implementation → subprocess-test fixes → CI Xvfb → docs → teleport-lerp fix → skills note.
 
 ## Lessons Learned
+- The accumulator's `MAX_ACCUMULATED_FRAMES` clamp is a spiral-of-death *safety* bound, not a render-floor guarantee (full 60Hz sim is sustained down to ~12 FPS render).
+- The "headless" client still opens a macroquad window (it is the GUI binary behind `#[macroquad::main]`), so CI needs Xvfb — a future phase should make it truly window-less.
+- See `docs/lessons.md` (Phase 2g section) and `docs/progress.md` for the full record.
