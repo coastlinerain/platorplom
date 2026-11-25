@@ -1,6 +1,6 @@
 mod hud;
 
-use game::config::TICK_HZ;
+use game::config::{HEADLESS_BUSY_WAIT_MS, MAX_ACCUMULATED_FRAMES, TICK_HZ};
 use game::maps::Map;
 use macroquad::prelude::*;
 use metroidvania_rust::network::logging::log_packet;
@@ -8,7 +8,7 @@ use metroidvania_rust::network::packet_io::PacketIO;
 use metroidvania_rust::network::world::send_join_req;
 use metroidvania_rust::world::game::World;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// RealPacketIO wraps the laminar socket for production use.
 struct RealPacketIO {
@@ -80,7 +80,7 @@ impl PacketIO for HeadlessPacketIO {
     }
 }
 
-async fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
+fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
     let mut socket = laminar::Socket::bind("0.0.0.0:0").unwrap();
     let sender = socket.get_packet_sender();
     let receiver = socket.get_event_receiver();
@@ -98,6 +98,7 @@ async fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
     let mut game_world = World::new(world_data, boxed);
 
     let tick_dt = 1.0 / TICK_HZ as f32;
+    let tick_interval = Duration::from_secs_f64(1.0 / TICK_HZ as f64);
     let max_ticks = if duration_secs > 0 {
         (duration_secs as f32 * TICK_HZ as f32) as u64
     } else {
@@ -109,6 +110,11 @@ async fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
         duration_secs, max_ticks
     );
 
+    // Fixed timestep with no drift: advance `next_tick` by a constant interval
+    // each iteration, then sleep for the bulk of the interval and busy-wait the
+    // last ~HEADLESS_BUSY_WAIT_MS for sub-millisecond precision (spec D2).
+    let mut next_tick = Instant::now() + tick_interval;
+
     for tick in 0..max_ticks {
         game_world.update(tick_dt);
 
@@ -117,13 +123,21 @@ async fn run_headless(duration_secs: u64, server_addr: SocketAddr) {
             println!("Headless tick: {}", tick);
         }
 
-        std::thread::sleep(Duration::from_millis(1000 / TICK_HZ as u64));
+        let now = Instant::now();
+        if now < next_tick {
+            let remaining = next_tick - now;
+            // Sleep for most of the interval, then busy-wait the remainder.
+            if remaining > Duration::from_millis(HEADLESS_BUSY_WAIT_MS) {
+                std::thread::sleep(remaining - Duration::from_millis(HEADLESS_BUSY_WAIT_MS));
+            }
+            while Instant::now() < next_tick {
+                std::hint::spin_loop();
+            }
+        }
+        next_tick += tick_interval;
     }
 
-    println!(
-        "Headless client finished after {} ticks",
-        max_ticks.min(max_ticks)
-    );
+    println!("Headless client finished after {} ticks", max_ticks);
 }
 
 #[macroquad::main("Rustvania")]
@@ -149,7 +163,7 @@ async fn main() {
         .unwrap();
 
     if headless {
-        run_headless(duration_secs, server_addr).await;
+        run_headless(duration_secs, server_addr);
         return;
     }
 
@@ -169,13 +183,68 @@ async fn main() {
     let world_data = Map::new();
     let mut game_world = World::new(world_data, boxed);
 
+    // Fixed-timestep accumulator (spec D1): separate the simulation dt (fixed
+    // 1/60s) from the render dt (variable). Each frame we accumulate the real
+    // elapsed time, run 0..=MAX_ACCUMULATED_FRAMES sim steps, then render with
+    // an interpolation alpha so motion looks smooth between ticks.
+    let tick_dt = 1.0f64 / TICK_HZ as f64;
+    let max_accumulator = MAX_ACCUMULATED_FRAMES as f64 * tick_dt;
+    let mut accumulator = 0.0f64;
+    let mut last_time = get_time();
+
     loop {
+        // Sample keyboard once per render frame and inject into World fields.
+        // (Input sampling must live here, not in World::update, so the sim is
+        // testable without a macroquad window.)
+        game_world.move_left = is_key_down(KeyCode::Left);
+        game_world.move_right = is_key_down(KeyCode::Right);
+        game_world.pressed_jump = is_key_pressed(KeyCode::Space);
+        game_world.pressed_shoot = is_key_pressed(KeyCode::Z);
+
+        // Debug: F11 key to manually reset clock sync (moved from World::update).
+        if is_key_pressed(KeyCode::F11) {
+            game_world.client_tick = 0;
+            game_world.server_tick_offset = 0;
+            game_world.clock_offset_ms = 0;
+            game_world.last_server_tick = 0;
+            game_world.last_server_time_ms = 0;
+            game_world.last_acked_server_tick = 0;
+            println!("Manual clock sync reset (F11)");
+        }
+
         if is_key_pressed(KeyCode::P) {
             println!("{:#?}", game_world);
         }
         clear_background(BLACK);
-        game_world.update(get_frame_time());
-        game_world.draw();
+
+        // Accumulate the real frame time (clamped to avoid the spiral of death).
+        let current_time = get_time();
+        let frame_dt = current_time - last_time;
+        last_time = current_time;
+
+        accumulator += frame_dt;
+        if accumulator > max_accumulator {
+            accumulator = max_accumulator;
+        }
+
+        // Inject the current viewport once per render frame (the camera does
+        // not query `screen_width`/`screen_height` itself, so `World::update`
+        // stays headless-testable). Must run BEFORE the accumulator loop below.
+        game_world
+            .camera
+            .set_viewport(screen_width(), screen_height());
+
+        // Run 0..=MAX_ACCUMULATED_FRAMES fixed-dt simulation steps.
+        let mut steps = 0u32;
+        while accumulator >= tick_dt && steps < MAX_ACCUMULATED_FRAMES {
+            game_world.update(tick_dt as f32);
+            accumulator -= tick_dt;
+            steps += 1;
+        }
+
+        // Interpolation alpha ∈ [0, 1): 0.0 = previous tick, ~1.0 = next tick.
+        let alpha = (accumulator / tick_dt) as f32;
+        game_world.draw(alpha);
 
         next_frame().await
     }

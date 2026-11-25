@@ -20,6 +20,15 @@ pub const INTERPOLATION_DELAY_TICKS: u8 = 5;
 /// a reconciliation (staleness heuristic).
 pub const STALENESS_THRESHOLD_TICKS: u64 = 5;
 
+/// Maximum simulation steps per render frame (spiral of death protection).
+/// At 60Hz, 5 steps = ~83ms of sim catch-up per frame (safety clamp, not a
+/// render floor).
+pub const MAX_ACCUMULATED_FRAMES: u32 = 5;
+
+/// Headless sleep precision: busy-wait for the last N milliseconds of each
+/// tick interval (the remainder is covered by `std::thread::sleep`).
+pub const HEADLESS_BUSY_WAIT_MS: u64 = 1;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -294,6 +294,15 @@ fn main() {
 
         // Run one authoritative tick when it's time (fixed step, not wall-clock).
         // Catch up if the event drain stole too much time (rare, but safe).
+        //
+        // Verified for Phase 2g (spec decision D3):
+        // - `tick_interval` is exact (`Duration::from_secs_f64(1.0 / 60.0)`).
+        // - `while now >= next_tick` runs one tick per missed interval, catching
+        //   up when the event drain was slow.
+        // - After catch-up we sleep `remaining.min(5ms)`, so we never busy-spin.
+        // - `next_tick += tick_interval` keeps ticks deterministically aligned
+        //   (no drift); if the server is consistently behind, it is overloaded
+        //   and the tick rate simply degrades rather than spiraling.
         let now = Instant::now();
         while now >= next_tick {
             let (shots, deaths) = world.update(tick_dt);

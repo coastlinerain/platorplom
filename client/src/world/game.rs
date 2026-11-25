@@ -64,6 +64,11 @@ pub struct World {
     pub last_server_tick: u64,
     pub last_server_time_ms: u64,
     pub last_acked_server_tick: u64, // for staleness heuristic
+    // --- NEW: Phase 2g - Render interpolation ---
+    /// Player state at the previous sim tick, used to lerp the render position
+    /// between ticks (`draw(alpha)`).
+    pub prev_player_pos: glam::Vec2,
+    pub prev_player_dir: f32,
 }
 
 impl fmt::Debug for World {
@@ -100,9 +105,17 @@ impl World {
 
         let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data, 0);
 
+        let player = Player::new(0);
+        // Initialize the interpolation source to the player's spawn state so the
+        // first rendered frame shows the current position with no visual jump.
+        let prev_player_pos = player.pos;
+        let prev_player_dir = player.dir;
+
         Self {
             id: None,
-            player: Player::new(0),
+            player,
+            prev_player_pos,
+            prev_player_dir,
             enemies,
             levels_matrix: levels,
             current_coords: (0, 0),
@@ -136,19 +149,8 @@ impl World {
     }
 
     pub fn update(&mut self, dt: f32) {
-        // Increment client tick for clock synchronization
+        // Increment client tick for clock synchronization (once per sim tick).
         self.client_tick = self.client_tick.wrapping_add(1);
-
-        // Debug: F11 key to manually reset clock sync
-        if is_key_pressed(KeyCode::F11) {
-            self.client_tick = 0;
-            self.server_tick_offset = 0;
-            self.clock_offset_ms = 0;
-            self.last_server_tick = 0;
-            self.last_server_time_ms = 0;
-            self.last_acked_server_tick = 0;
-            println!("Manual clock sync reset (F11)");
-        }
 
         // Run transition check AFTER bullet-vs-enemy collision so bullets
         // can hit enemies on the frame they're fired, even if the player
@@ -158,26 +160,22 @@ impl World {
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
-            // Sample edge keys ONCE per frame (is_key_pressed is stateful — first call consumes).
-            let pressed_jump = is_key_pressed(KeyCode::Space);
-            let pressed_shoot = is_key_pressed(KeyCode::Z);
-
-            // Sample held keys — stored on World so update_network can read them.
-            self.move_left = is_key_down(KeyCode::Left);
-            self.move_right = is_key_down(KeyCode::Right);
+            // Store the previous player state BEFORE simulating so
+            // `interpolated_player_pos/dir` can lerp prev → current (Phase 2g).
+            self.prev_player_pos = self.player.pos;
+            self.prev_player_dir = self.player.dir;
 
             // --- CLIENT PREDICTION: simulate local player immediately ---
+            // Input is injected programmatically (sampled once per render frame
+            // in main.rs) so that `update` has no macroquad input dependency and
+            // runs safely under `#[cfg(test)]` with no window.
             let local_input = game::entities::player::PlayerInput {
                 move_left: self.move_left,
                 move_right: self.move_right,
-                jump: pressed_jump,
-                shoot: false, // bullet spawn is separate
+                jump: self.pressed_jump,
+                shoot: false, // bullet spawn is server-authoritative (Phase 2e)
             };
             self.player.update(dt, level, &local_input);
-
-            // Store edge keys so update_network can read them (is_key_pressed is consumed).
-            self.pressed_jump = pressed_jump;
-            self.pressed_shoot = pressed_shoot;
 
             // NOTE: Local bullet spawn on pressed_shoot is REMOVED (Phase 2e).
             // Bullets are now spawned only when BulletSpawn packet arrives from server.
@@ -208,7 +206,23 @@ impl World {
         self.enemies.retain(|e| e.alive);
     }
 
-    pub fn draw(&self) {
+    /// Interpolate the local player's render position between the previous and
+    /// current sim tick (`prev_player_pos` → `player.pos`), clamping `alpha` to
+    /// [0, 1] so an out-of-range first `frame_dt` never extrapolates.
+    pub fn interpolated_player_pos(&self, alpha: f32) -> glam::Vec2 {
+        let a = alpha.clamp(0.0, 1.0);
+        self.prev_player_pos.lerp(self.player.pos, a)
+    }
+
+    /// Interpolate the local player's facing direction between the previous and
+    /// current sim tick. Uses simple linear interpolation (see Box 4 Watch out
+    /// for the -π/π boundary limitation, accepted for small per-tick changes).
+    pub fn interpolated_player_dir(&self, alpha: f32) -> f32 {
+        let a = alpha.clamp(0.0, 1.0);
+        self.prev_player_dir + (self.player.dir - self.prev_player_dir) * a
+    }
+
+    pub fn draw(&self, alpha: f32) {
         self.camera.apply();
 
         let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
@@ -245,8 +259,18 @@ impl World {
             }
         }
 
-        // Own player.
-        self.player.draw();
+        // Own player — render at the interpolated position for smooth motion
+        // between sim ticks. (The rectangle is direction-agnostic, so only the
+        // position affects rendering today; `interpolated_player_dir` is kept
+        // for API parity and a future facing indicator.)
+        let render_pos = self.interpolated_player_pos(alpha);
+        draw_rectangle(
+            render_pos.x,
+            render_pos.y,
+            self.player.w,
+            self.player.h,
+            RED,
+        );
 
         // Own bullets.
         for bullet in &self.bullets {
@@ -381,11 +405,17 @@ mod tests {
         }
 
         // Should execute exactly MAX_ACCUMULATED_FRAMES (5) steps
-        assert_eq!(sim_steps, MAX_ACCUMULATED_FRAMES, "should execute exactly 5 sim steps for 1s frame_dt");
+        assert_eq!(
+            sim_steps, MAX_ACCUMULATED_FRAMES,
+            "should execute exactly 5 sim steps for 1s frame_dt"
+        );
 
         // Accumulator should be clamped to max_accumulator - 5 * TICK_DT
         // max_accumulator = 5 * TICK_DT, so after 5 steps: accumulator = 0
-        assert!((accumulator - 0.0).abs() < f32::EPSILON, "accumulator should be 0 after 5 steps");
+        assert!(
+            (accumulator - 0.0).abs() < f32::EPSILON,
+            "accumulator should be 0 after 5 steps"
+        );
     }
 
     /// Box 10 (AC4): interpolated_player_pos/dir(alpha) — lerp at 0.0, 0.5, 1.0.
