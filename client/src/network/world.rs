@@ -6,6 +6,14 @@ use game::entities::nemesis::Nemesis;
 use protocol::GamePacket;
 
 pub fn update_network(world: &mut World) {
+    recv_and_process(world);
+    send_input(world);
+}
+
+/// Receive half: drain all pending packets and run the (currently inert)
+/// staleness check. Public so `Paused` can receive/process packets without
+/// stepping the simulation or sending input.
+pub fn recv_and_process(world: &mut World) {
     // Receive: drain all pending packets from the server.
     while let Some(decoded) = world.network.try_recv() {
         handle_packet(world, decoded);
@@ -30,8 +38,10 @@ pub fn update_network(world: &mut World) {
             }
         }
     }
+}
 
-    // Send: forward inputs to the server each frame (once assigned an id).
+/// Send half: send one `PlayerInput` if `world.id.is_some()`.
+pub fn send_input(world: &mut World) {
     if let Some(id) = world.id {
         // --- Sticky edge handling (D6) ---
         // Read edge keys from World (sampled once in World::update — is_key_pressed is
@@ -106,6 +116,10 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             server_tick,
             server_time_ms,
         } => {
+            // Any PlayerPos (own or remote) proves the link is alive — the
+            // disconnect watchdog consumes this flag each frame.
+            world.received_player_pos = true;
+
             if Some(id) == world.id {
                 // --- PHASE 2f: CLOCK SYNCHRONIZATION ---
                 // Update clock offset using server timestamp

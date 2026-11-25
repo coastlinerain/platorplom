@@ -69,6 +69,10 @@ pub struct World {
     /// between ticks (`draw(alpha)`).
     pub prev_player_pos: glam::Vec2,
     pub prev_player_dir: f32,
+    // --- NEW: game state machine - Disconnect watchdog liveness flag ---
+    /// Set true by `handle_packet` when any `PlayerPos` is received; consumed by
+    /// the app runner's disconnect watchdog (cleared each frame after the check).
+    pub received_player_pos: bool,
 }
 
 impl fmt::Debug for World {
@@ -145,6 +149,7 @@ impl World {
             pressed_shoot: false,
             move_left: false,
             move_right: false,
+            received_player_pos: false,
         }
     }
 

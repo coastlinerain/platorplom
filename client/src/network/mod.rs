@@ -1,4 +1,5 @@
 pub mod client;
+pub mod handshake;
 pub mod interpolation;
 pub mod logging;
 pub mod packet_io;
