@@ -1,6 +1,6 @@
 # Game State Machine
 
-- Status: draft
+- Status: implemented
 - Date: 2026-11-25
 - Branch: `feat/game-state-machine`
 

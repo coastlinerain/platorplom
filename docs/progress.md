@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-25 (Phase 2g COMPLETE — code review + QA APPROVED, QA m2 FixedTimestep refactor done; all tests green, fmt/clippy clean, CI runs tests under Xvfb)
+> Last updated: 2026-11-25 (Phase 2h game-state-machine IMPLEMENTED — 18 RED tests green, all 5 boxes + e2e process helper done; code review + QA pending)
 
 ## Current status
 
@@ -76,28 +76,45 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Box 16 — fixed-rate input send verified (natural consequence of accumulator)
 - [x] Box 17 — `cargo test` + `cargo fmt --check` + `cargo clippy -- -D warnings` (green)
 
+## Phase 2h checklist — game state machine (`feat/game-state-machine`)
+- [x] Spec written (`docs/specs/game-state-machine.md`), ADR-0002 accepted
+- [x] Plan review passed (`docs/plans/game-state-machine.md`)
+- [x] Box 1 — `game/src/state_machine.rs` (`AppState` ×6, `AppEvent` ×11, total `transition`), `CONNECT_TIMEOUT_MS`/`DISCONNECT_TIMEOUT_MS` in `game/src/config.rs`
+- [x] Box 2 — `client/src/network/handshake.rs` (`poll_join_response`), `update_network` → `recv_and_process` + `send_input`, `World.received_player_pos` liveness flag
+- [x] Box 3 — `client/src/app.rs` (`App` runner + `TransportFactory`), re-exported from `client/src/lib.rs`
+- [x] Box 4 — `client/src/main.rs` thin loop over `App` (GUI + headless share handshake/state machine)
+- [x] Box 5.8 — `e2e/src/process.rs` shared "spawn server + headless client" helper (port-serialized + `Drop` guard); `headless_timing.rs` + `packet_log_rate.rs` refactored to run against a live server
+- [ ] Code review (reviewer) — AC11/AC12/AC13 review, AC14 diff review (`protocol/`/`server/` untouched)
+- [ ] QA + CI — AC15 `cargo test`/`fmt --check`/`clippy -D warnings` (verification ran via orchestrator; implementer shell was denied)
+
 ## Next actions (top = do first)
 
-1. **Push/PR (owner merges)** — Phase 2g branch is complete (12 commits, all
+1. **Phase 2h game-state-machine — verify + commit + review** — implementation
+   complete (Boxes 1–5.8). The implementer's shell was denied, so the
+   orchestrator must run `cargo test`/`fmt --check`/`clippy -D warnings`, fix any
+   surfaced issues, then commit in small steps with `## Explain` blocks. Then
+   code review (AC11/AC12/AC13 review + AC14 diff review: `protocol/`/`server/`
+   untouched) and QA.
+2. **Push/PR (owner merges)** — Phase 2g branch is complete (12 commits, all
    gates green, code review + QA APPROVED). Push + open PR to `dev`; owner merges.
-2. **QA follow-ups (deferred, non-blocking)** — (b) feed the camera the
+3. **QA follow-ups (deferred, non-blocking)** — (b) feed the camera the
    interpolated render position rather than the raw sim position to avoid camera
    micro-stutter (QA m5, folds into netcode-smoothness); (c) snap
    `prev_player_*` after reconciliation, same root cause as the teleport-lerp
    glitch (QA n3). *(m2 — extract `FixedTimestep` — was DONE this phase; see
    `game/src/fixed_timestep.rs`.)*
-3. **Process: subagent shell access** — QA M1 (shell denied → broken red-green
+4. **Process: subagent shell access** — QA M1 (shell denied → broken red-green
    signal). The agent config ALREADY grants read-only shell (`cargo *` allow +
    read-only git, `*` deny as catch-all, ordered per the OpenCode "last match
    wins" docs), but it was **flaky/transient** during this session (likely
    config-reload churn while the orchestrator committed agent changes
    mid-session). Re-verify it is stable next phase; if it recurs, file an
    OpenCode bug via the `report` skill.
-4. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
+5. **Phase 2g naming/cleanup (from grill)** — rename `CLIENT_HZ` → `RENDER_HZ`;
    drop "30 FPS floor" wording (done in spec/plan); add `GLOSSARY.md` (done).
-5. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+6. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English (deferred from 2g).
-6. **Follow-up: netcode smoothness review** — owner wants a seamless online
+7. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
@@ -157,3 +174,13 @@ Working memory for the project. **Update this at the end of every task.**
   stress-test that was instead done as a plain Q&A). Next phase: when a task
   matches a skill's purpose, prompt that subagent to reach for the skill rather
   than assuming it will happen automatically.
+- (2h implemented) Game-state-machine spec + plan + RED tests → implementation
+  complete. Boxes 1–5.8 done (pure `transition` core, `poll_join_response`
+  handshake, `update_network` receive/send split + `received_player_pos`
+  liveness flag, `App` runner + `TransportFactory`, `main.rs` thin-loop rewrite,
+  and the `e2e/src/process.rs` "spawn server + headless client" helper with
+  port-serialization + `Drop` guard). The implementer's shell was **denied**, so
+  `cargo test`/`fmt`/`clippy` verification and the commit are the orchestrator's
+  job (see Next actions #1). `protocol/` and `server/` were left untouched
+  (AC14). The headless e2e tests (`headless_timing.rs`, `packet_log_rate.rs`)
+  were refactored to spawn a live server because headless now genuinely connects.

@@ -1,6 +1,6 @@
 # Game State Machine — Implementation Plan
 
-- Status: draft
+- Status: implemented (2026-11-25, 18 new RED tests → green)
 - Spec: `docs/specs/game-state-machine.md`
 - ADR: `docs/adr/0002-game-state-machine.md` (Accepted)
 - Date: 2026-11-25

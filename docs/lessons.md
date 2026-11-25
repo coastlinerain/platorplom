@@ -482,3 +482,35 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `game/src/fixed_timestep.rs` (`new` vs `with_max_accumulator`), the `advance_max_frames_guard_caps_steps` test.
 - **What it is**: The spiral-of-death guard `while accumulator >= tick_dt && steps < max_frames` was dead in production because `new` ties `max_accumulator = max_frames * tick_dt`, so the clamp already bounds the accumulator to `max_frames` ticks and the guard can never be the binding constraint. To test the guard *at all*, you must break the coupling: a second constructor (`with_max_accumulator`) lets a test set `max_accumulator` much larger than `max_frames * tick_dt`, so a 1s frame against a 10s cap would drain ~60 ticks without the guard — and `assert_eq!(advance(1.0), 2)` only passes because the guard caps it.
 - **Gotcha / insight**: A guard that is *redundant* under the normal constructor is invisible to tests that only use `new`. The general pattern: when a defensive branch is provably unreachable through the public happy path, add a narrow, clearly-documented seam (an alternate constructor or a `#[cfg(test)]` field setter) that re-creates the edge case, then assert the branch. Otherwise the guard rots silently — exactly QA m2's complaint.
+
+## Phase 2h (2026-11-25) — Game State Machine
+
+### Flat total state machine as a pure enum transition function (2026-11-25)
+
+- **Where**: `game/src/state_machine.rs` (`AppState`, `AppEvent`, `transition`).
+- **What it is**: The whole client lifecycle is a flat `enum AppState` (6 variants) driven by an `enum AppEvent` (11 variants) through one `transition(state, event) -> AppState` function. A single `match (state, event)` lists the 16 valid edges and a wildcard `_ => state` turns every other pair into a no-op, so the 6×11 = 66 grid is *total* — no `Option`, no sentinel, no panic. `Quitting` is terminal (an explicit arm returns `Quitting` for every event).
+- **Gotcha / insight**: Keeping `transition` side-effect free is what makes it exhaustively unit-testable (16 edges + 50 no-ops + terminal state, all in a programmatic loop). All *side effects* (bind socket, send `JoinRequest`, construct `World`, send `Leave`, drop socket) live in the runner's `dispatch`, keyed off the same `(state, event)` pairs — the pure function says *what* changed, the runner says *how*.
+
+### `Box<dyn Fn() -> Box<dyn PacketIO>>` — a boxed closure as a DI seam (2026-11-25)
+
+- **Where**: `client/src/app.rs` (`TransportFactory`), `client/src/main.rs`.
+- **What it is**: `pub type TransportFactory = Box<dyn Fn() -> Box<dyn PacketIO>>` is a factory held as a trait-object closure. Production passes a closure that binds a laminar socket on `0.0.0.0:0`; the e2e tests pass one that hands out `LoopbackTransport`s. Each `StartJoin`/`Retry` calls `(self.factory)()` to get a *fresh* socket, enforcing the bind-per-join lifecycle without the `App` knowing how sockets are made.
+- **Gotcha / insight**: A `Box<dyn Fn>` (not `FnMut`) can still mutate through an interior-mutability capture — the e2e factory pushes into an `Rc<RefCell<Vec<_>>>` from inside a `move ||` closure. The double indirection (`Box` for the unsized `dyn Fn`, `Box` for the unsized `dyn PacketIO` return) is the price of erasing two concrete types at once.
+
+### Receive/send split for pause semantics (2026-11-25)
+
+- **Where**: `client/src/network/world.rs` (`recv_and_process` + `send_input` + `update_network`).
+- **What it is**: `update_network` was one function (drain → staleness → send). Splitting it into `recv_and_process` (drain + handle_packet + the inert staleness check) and `send_input` (emit one `PlayerInput` when an id is assigned) lets `Paused` call `recv_and_process` alone — it keeps receiving and reconciling server state while sending nothing and stepping nothing. `update_network` stays `{ recv_and_process; send_input; }` so `Playing` is byte-for-byte unchanged.
+- **Gotcha / insight**: The staleness check is a *receive-side* concern and must move with the drain (into `recv_and_process`), not into `send_input` — otherwise `update_network`'s order of operations (drain → staleness → send) would change and the reconciliation regression tests would catch it.
+
+### `static Mutex<()>` + `Drop` guard to serialize port-bound subprocess tests (2026-11-25)
+
+- **Where**: `e2e/src/process.rs` (`SERVER_PORT_LOCK`, `ServerGuard`).
+- **What it is**: The server binary hardcodes `127.0.0.1:12345`, so two e2e tests that each spawn a live server would race on the port (`AddrInUse`). A `static Mutex<()>` is locked for the duration of each server-spawning test (serializing them), and a `ServerGuard` wrapping `Child` kills + reaps the server in its `Drop` impl so the port is released on teardown. `cargo` is invoked with `.current_dir(env!("CARGO_MANIFEST_DIR"))` so `-p metroidvania-server` resolves the workspace regardless of CWD.
+- **Gotcha / insight**: Drop order matters: locals drop in *reverse* declaration order, so declaring `_server` after `_guard` makes the server die before the lock is released. UDP has no TIME_WAIT, so a killed process frees the port immediately — the lock only needs to prevent two *live* servers overlapping, not to wait out a lingering socket.
+
+### `Instant::saturating_duration_since` for safe frame deltas (2026-11-25)
+
+- **Where**: `client/src/app.rs` (`update_playing`).
+- **What it is**: `now.saturating_duration_since(self.last_time)` returns `Duration::ZERO` when `now < self.last_time` instead of panicking like `duration_since`. The accumulator's `frame_dt` is therefore robust to the first frame after a state entry (where `last_time` is seeded to the entry instant) and to any non-monotonic clock wobble.
+- **Gotcha / insight**: It's the monotonic cousin of `checked_duration_since` (which returns `Option`). Prefer `saturating_` when you want a `Duration` to flow straight into arithmetic (`.as_secs_f64()`) without an `unwrap_or_default` step; prefer `checked_` when the "no valid duration" case needs a distinct branch.
