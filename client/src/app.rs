@@ -266,6 +266,7 @@ impl App {
         let mut world = World::new(Map::new(), io);
         world.id = Some(assigned_id);
         world.player.id = assigned_id;
+        println!("Connected! My ID is {}", assigned_id);
         self.world = Some(world);
         self.last_player_pos_deadline = Some(now + Duration::from_millis(DISCONNECT_TIMEOUT_MS));
         self.last_time = now;
