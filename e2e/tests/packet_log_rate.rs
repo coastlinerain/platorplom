@@ -23,12 +23,15 @@ fn extract_ts_ms(line: &str) -> Option<u64> {
 
 #[test]
 fn packet_log_playerinput_rate() {
-    std::env::set_var("RUSTVANIA_PACKET_LOG", "1");
+    // SAFETY: `set_var` is `unsafe` in Rust 2024 (a concurrent read of the same
+    // env var while another thread calls `set_var` is UB). This test is the only
+    // writer in a single-threaded subprocess spawn; no other thread touches it.
+    unsafe { std::env::set_var("RUSTVANIA_PACKET_LOG", "1") };
 
     // A server is required so the client receives a JoinResponse and gets an id;
     // `update_network` only sends PlayerInput once an id is assigned.
     let mut server = Command::new("cargo")
-        .args(["run", "--bin", "metroidvania-server"])
+        .args(["run", "-p", "metroidvania-server"])
         .spawn()
         .expect("failed to start server");
     std::thread::sleep(Duration::from_millis(500));
@@ -37,7 +40,7 @@ fn packet_log_playerinput_rate() {
     let output = Command::new("cargo")
         .args([
             "run",
-            "--bin",
+            "-p",
             "metroidvania-rust",
             "--",
             "--headless",
@@ -53,10 +56,11 @@ fn packet_log_playerinput_rate() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut timestamps: Vec<u64> = Vec::new();
     for line in stdout.lines() {
-        if line.contains("\"dir\":\"sent\"") && line.contains("\"type\":\"PlayerInput\"") {
-            if let Some(ts) = extract_ts_ms(line) {
-                timestamps.push(ts);
-            }
+        if line.contains("\"dir\":\"sent\"")
+            && line.contains("\"type\":\"PlayerInput\"")
+            && let Some(ts) = extract_ts_ms(line)
+        {
+            timestamps.push(ts);
         }
     }
 

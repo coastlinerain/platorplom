@@ -38,7 +38,11 @@ fn server_catchup_processes_all_queued_inputs() {
 
     // The player advanced: the queued inputs were applied, not lost.
     let (x, _) = h.server_player_pos(p);
-    assert!(x > 100.0, "server player should have advanced after catch-up, x={}", x);
+    assert!(
+        x > 100.0,
+        "server player should have advanced after catch-up, x={}",
+        x
+    );
 }
 
 #[test]
@@ -50,7 +54,11 @@ fn server_current_tick_is_monotonic_under_rapid_ticks() {
     for _ in 0..100 {
         h.tick();
         let now = h.server.current_tick();
-        assert_eq!(now, last + 1, "current_tick must advance by exactly 1 per update");
+        assert_eq!(
+            now,
+            last + 1,
+            "current_tick must advance by exactly 1 per update"
+        );
         last = now;
     }
     assert_eq!(h.server.current_tick(), 100);

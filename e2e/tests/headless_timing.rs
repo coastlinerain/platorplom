@@ -25,7 +25,7 @@ fn run_headless(duration_secs: u64) -> (String, Duration) {
     let output = Command::new("cargo")
         .args([
             "run",
-            "--bin",
+            "-p",
             "metroidvania-rust",
             "--",
             "--headless",
