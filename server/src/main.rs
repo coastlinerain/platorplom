@@ -102,9 +102,20 @@ fn main() {
                                     }
                                 }
                             }
-                            // Client-sent PlayerPos and Action are no longer
-                            // accepted — the server is authoritative.
-                            GamePacket::PlayerPos { .. } | GamePacket::Action { .. } => {}
+                            GamePacket::EnemyStateRequest { room_x, room_y } => {
+                                // Respond with EnemyStateResponse for the requested room
+                                let enemies = world.get_enemy_state(room_x, room_y);
+                                let response = GamePacket::EnemyStateResponse {
+                                    room_x,
+                                    room_y,
+                                    enemies,
+                                };
+                                let bytes = postcard::to_allocvec(&response).unwrap();
+                                let _ =
+                                    packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
+                            }
+                            // Client-sent PlayerPos is no longer accepted — the server is authoritative.
+                            GamePacket::PlayerPos { .. } => {}
                             _ => {}
                         }
                     }
@@ -124,7 +135,7 @@ fn main() {
         // Catch up if the event drain stole too much time (rare, but safe).
         let now = Instant::now();
         while now >= next_tick {
-            let shots = world.update(tick_dt);
+            let (shots, deaths) = world.update(tick_dt);
 
             // Broadcast authoritative PlayerPos from EVERY player to EVERY
             // connected address (nested loop: dest × players). The own-player
@@ -147,20 +158,43 @@ fn main() {
                 }
             }
 
-            // Rebroadcast shoot notifications to the OTHER players only
-            // (the shooter's own client spawns its bullet locally).
-            for &(shooter_id, dir) in &shots {
-                for (&addr, &player_id) in &addrs {
-                    if player_id == shooter_id {
-                        continue; // skip the shooter
+            // Broadcast BulletSpawn to ALL clients (including shooter) via reliable_ordered
+            for shot in &shots {
+                let packet = GamePacket::BulletSpawn {
+                    bullet_id: shot.bullet_id,
+                    x: shot.x,
+                    y: shot.y,
+                    dir: shot.dir,
+                    owner_id: shot.owner_id,
+                    seq: shot.seq,
+                };
+                let bytes = postcard::to_allocvec(&packet).unwrap();
+                for &dest_addr in addrs.keys() {
+                    let _ = packet_sender.send(Packet::reliable_ordered(
+                        dest_addr,
+                        bytes.clone(),
+                        None,
+                    ));
+                }
+            }
+
+            // Broadcast EnemyDied to clients in the same room via reliable_ordered
+            for death in &deaths {
+                let packet = GamePacket::EnemyDied {
+                    enemy_id: death.enemy_id,
+                    room_x: death.room_x,
+                    room_y: death.room_y,
+                };
+                let bytes = postcard::to_allocvec(&packet).unwrap();
+                for (&dest_addr, &player_id) in &addrs {
+                    let player_coords = world.coords().get(&player_id).copied().unwrap_or((0, 0));
+                    if player_coords == (death.room_x, death.room_y) {
+                        let _ = packet_sender.send(Packet::reliable_ordered(
+                            dest_addr,
+                            bytes.clone(),
+                            None,
+                        ));
                     }
-                    let bytes = postcard::to_allocvec(&GamePacket::Action {
-                        id: shooter_id,
-                        kind: "shoot".to_string(),
-                        dir,
-                    })
-                    .unwrap();
-                    let _ = packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
                 }
             }
 

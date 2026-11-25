@@ -1,6 +1,6 @@
 use crate::network::packet_io::PacketIO;
 use crate::network::prediction::{self, InputEntry, InputRingBuffer};
-use crate::world::game::World;
+use crate::world::game::{ConfirmedBullet, World};
 use game::entities::bullet::Bullet;
 use game::entities::nemesis::Nemesis;
 use protocol::GamePacket;
@@ -36,7 +36,7 @@ pub fn update_network(world: &mut World) {
             move_left,
             move_right,
             jump,
-            shoot,
+            shoot, // still sent to server for cooldown/raycast
             seq,
         };
 
@@ -63,6 +63,8 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.input_buffer = InputRingBuffer::new();
             world.jump_sticky = 0;
             world.shoot_sticky = 0;
+            world.spawned_bullet_ids.clear();
+            world.confirmed_bullets.clear();
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -162,25 +164,83 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 interp.push(nemesis, x, y, dir);
             }
         }
-        GamePacket::Action { id, kind, dir } => {
-            if kind == "shoot" {
-                if let Some(enemy) = world.other_players.get(&id) {
-                    println!("Player {} shot from {:?}", id, enemy.pos);
+        // NEW: Phase 2e - BulletSpawn from server (authoritative bullet spawn)
+        GamePacket::BulletSpawn {
+            bullet_id,
+            x,
+            y,
+            dir,
+            owner_id,
+            seq,
+        } => {
+            // Deduplicate by bullet_id
+            if world.spawned_bullet_ids.contains(&bullet_id) {
+                return;
+            }
+            world.spawned_bullet_ids.insert(bullet_id);
 
-                    let spawn_center = glam::Vec2::new(
-                        enemy.pos.x + (enemy.w / 2.0),
-                        enemy.pos.y + (enemy.h / 2.0),
-                    );
+            // Store confirmed bullet for reconciliation (keyed by input seq)
+            world.confirmed_bullets.insert(
+                seq,
+                ConfirmedBullet {
+                    bullet_id,
+                    x,
+                    y,
+                    dir,
+                },
+            );
 
-                    if enemy.coords == world.current_coords {
-                        println!("SAME room");
+            let spawn_pos = glam::Vec2::new(x, y);
+            if Some(owner_id) == world.id {
+                // Own bullet: spawn at server-authoritative position
+                world.bullets.push(Bullet::new(spawn_pos, dir, owner_id));
+            } else {
+                // Remote player's bullet: spawn as enemy_bullet
+                world
+                    .enemy_bullets
+                    .push(Bullet::new(spawn_pos, dir, owner_id));
+            }
+        }
+        // NEW: Phase 2e - EnemyDied from server (authoritative enemy death)
+        GamePacket::EnemyDied {
+            enemy_id,
+            room_x,
+            room_y,
+        } => {
+            // Only process if we're in the same room
+            if room_x as usize == world.current_coords.0
+                && room_y as usize == world.current_coords.1
+                && let Some(enemy) = world.enemies.iter_mut().find(|e| e.id == enemy_id)
+            {
+                enemy.die();
+            }
+            // If room mismatch, ignore silently — room load will sync state
+        }
+        // NEW: Phase 2e - EnemyStateResponse from server (room load sync)
+        GamePacket::EnemyStateResponse {
+            room_x,
+            room_y,
+            enemies,
+        } => {
+            // Only process if we're in the requested room
+            if room_x as usize == world.current_coords.0
+                && room_y as usize == world.current_coords.1
+            {
+                // Re-run enemies_from_data to get kinds, then match by spawn order
+                let level = &world.levels_matrix[room_y as usize][room_x as usize];
+                let template_enemies =
+                    game::entities::enemy::enemies_from_data(&level.data, room_x);
 
-                        world
-                            .enemy_bullets
-                            .push(Bullet::new(spawn_center, dir, enemy.id));
+                for (i, (enemy_id, alive, _spawn_x, _spawn_y)) in enemies.into_iter().enumerate() {
+                    if alive && i < template_enemies.len() {
+                        let template = &template_enemies[i];
+                        let enemy = game::entities::enemy::Enemy::new(
+                            enemy_id,
+                            template.pos,
+                            template.kind,
+                        );
+                        world.enemies.push(enemy);
                     }
-                } else {
-                    println!("DEBUG: Received shot from ID {} but not in my list!", id);
                 }
             }
         }

@@ -7,6 +7,7 @@ fn c1_two_clients_connect_and_receive_ids() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse
 
     let id0 = h.client(p0).world.id;
     let id1 = h.client(p1).world.id;
@@ -21,6 +22,7 @@ fn c2_remote_player_position_is_visible() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse
 
     let p0_id = h.client(p0).world.id.unwrap();
 
@@ -48,6 +50,7 @@ fn c3_remote_interp_has_snapshots_after_playerpos() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse
 
     let p0_id = h.client(p0).world.id.unwrap();
 
@@ -73,6 +76,7 @@ fn c3_remote_interp_has_snapshots_after_playerpos() {
 fn c4_late_join_sees_existing_players() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse for p0
 
     let p0_id = h.client(p0).world.id.unwrap();
 
@@ -82,6 +86,7 @@ fn c4_late_join_sees_existing_players() {
 
     // p1 joins late.
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse for p1
 
     // Tick once so p1 receives a PlayerPos broadcast for p0.
     h.tick_n(1);
@@ -95,6 +100,7 @@ fn c5_player_leave_removes_remote_entry() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse
 
     let p0_id = h.client(p0).world.id.unwrap();
 
@@ -119,6 +125,7 @@ fn c6_remote_in_different_room_has_different_coords() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let p1 = h.connect_client();
+    h.tick_n(1); // Process JoinResponse
 
     let p0_id = h.client(p0).world.id.unwrap();
 

@@ -121,7 +121,7 @@ fn d5_bullet_direction_matches_player_direction() {
 }
 
 #[test]
-fn d6_remote_receives_action_for_bullet() {
+fn d6_remote_receives_bulletspawn_for_bullet() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
     let _p1 = h.connect_client();
@@ -129,24 +129,25 @@ fn d6_remote_receives_action_for_bullet() {
     let p0_id = h.client(p0).player_id;
 
     // p0 shoots. Loop until the server processes the shot and
-    // last_actions is populated (happens within 1-3 ticks).
+    // last_broadcasts is populated (BulletSpawn is broadcast to all).
     h.press_shoot(p0);
     for _ in 0..5 {
         h.tick();
-        if !h.last_actions.is_empty() {
+        if !h.last_broadcasts.is_empty() {
             break;
         }
     }
 
-    // Check that p1 received an Action packet for p0's shoot.
-    let actions_for_remote: Vec<_> = h
-        .last_actions
+    // Check that p1 received a PlayerPos/BulletSpawn packet for p0's shoot.
+    // Since BulletSpawn is broadcast to all clients, p1 should receive it.
+    let broadcasts_for_remote: Vec<_> = h
+        .last_broadcasts
         .iter()
-        .filter(|(handle, kind, _dir)| *kind == "shoot" && h.client(*handle).player_id != p0_id)
+        .filter(|(handle, pid, _, _)| *pid == p0_id && h.client(*handle).player_id != p0_id)
         .collect();
 
     assert!(
-        !actions_for_remote.is_empty(),
-        "remote client should receive an Action packet when p0 shoots"
+        !broadcasts_for_remote.is_empty(),
+        "remote client should receive BulletSpawn broadcast when p0 shoots"
     );
 }

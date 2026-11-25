@@ -1,5 +1,4 @@
 use crate::world::game::World;
-use game::entities::enemy::enemies_from_data;
 use protocol::GamePacket;
 
 pub fn update_enemy_bullets_position(world: &mut World, dt: f32) {
@@ -38,21 +37,30 @@ fn handle_death(world: &mut World) {
     println!("You died! Returning to start...");
     world.current_coords = (0, 0);
     world.player.pos = glam::Vec2::new(100.0, 100.0);
+    // Clear bullet tracking on death/respawn
+    world.spawned_bullet_ids.clear();
+    world.confirmed_bullets.clear();
     load_current_level(world);
 }
 
 fn load_current_level(world: &mut World) {
     world.enemies.clear();
     world.bullets.clear();
+    world.enemy_bullets.clear();
+    world.spawned_bullet_ids.clear();
+    world.confirmed_bullets.clear();
 
-    let level = &world.levels_matrix[world.current_coords.1][world.current_coords.0];
-    world.enemies = enemies_from_data(&level.data);
+    // Request authoritative enemy state from server
+    let (rx, ry) = world.current_coords;
+    let req = GamePacket::EnemyStateRequest {
+        room_x: rx as u8,
+        room_y: ry as u8,
+    };
+    world.network.send(req);
 
     println!(
-        "Level {},{} loaded with {} enemies",
-        world.current_coords.0,
-        world.current_coords.1,
-        world.enemies.len()
+        "Level {},{} load requested (EnemyStateRequest sent)",
+        world.current_coords.0, world.current_coords.1
     );
 }
 pub fn check_level_transitions(world: &mut World) {

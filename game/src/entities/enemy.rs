@@ -31,6 +31,7 @@ pub struct Enemy {
     pub timer: f32,
     pub alive: bool,
     pub kind: EnemyKind,
+    pub id: u8, // Stable enemy ID (room_x * 16 + spawn_index)
 }
 
 impl Colisionable for Enemy {
@@ -40,7 +41,7 @@ impl Colisionable for Enemy {
 }
 
 impl Enemy {
-    pub fn new(pos: Vec2, kind: EnemyKind) -> Self {
+    pub fn new(id: u8, pos: Vec2, kind: EnemyKind) -> Self {
         Self {
             pos,
             vel: Vec2::new(0.0, 0.0),
@@ -51,6 +52,7 @@ impl Enemy {
             timer: 0.0,
             alive: true,
             kind,
+            id,
         }
     }
 
@@ -115,16 +117,27 @@ impl Enemy {
 
 /// Iterate one room's `data` grid and build the enemies it declares.
 /// Pure: no `World`, no `NetworkClient`, no socket, no thread.
-pub fn enemies_from_data(data: &[Vec<EntityType>]) -> Vec<Enemy> {
+/// Assigns stable IDs: `id = room_x * 16 + spawn_index` (spawn_index is 0-based row-major order).
+/// The `room_x` parameter is required for correct ID assignment.
+pub fn enemies_from_data(data: &[Vec<EntityType>], room_x: u8) -> Vec<Enemy> {
     let mut enemies = Vec::new();
+    let mut spawn_index = 0u8;
 
     for (y, row) in data.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
             let pos = Vec2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE);
 
             match cell {
-                EntityType::EnemySpawn => enemies.push(Enemy::new(pos, EnemyKind::Enemy)),
-                EntityType::PotionSpawn => enemies.push(Enemy::new(pos, EnemyKind::Potion)),
+                EntityType::EnemySpawn | EntityType::PotionSpawn => {
+                    let kind = match cell {
+                        EntityType::EnemySpawn => EnemyKind::Enemy,
+                        EntityType::PotionSpawn => EnemyKind::Potion,
+                        _ => unreachable!(),
+                    };
+                    let id = room_x * 16 + spawn_index;
+                    enemies.push(Enemy::new(id, pos, kind));
+                    spawn_index += 1;
+                }
                 _ => {}
             }
         }
@@ -146,22 +159,24 @@ mod tests {
             vec![EntityType::EnemySpawn, EntityType::Empty],
             vec![EntityType::BossSpawn, EntityType::PotionSpawn],
         ];
-        let enemies = enemies_from_data(&data);
+        let enemies = enemies_from_data(&data, 0);
 
         assert_eq!(enemies.len(), 2);
         assert_eq!(enemies[0].pos, Vec2::new(0.0, 0.0));
         assert_eq!(enemies[1].pos, Vec2::new(TILE_SIZE, TILE_SIZE));
         assert_eq!(enemies[0].kind, EnemyKind::Enemy);
         assert_eq!(enemies[1].kind, EnemyKind::Potion);
+        assert_eq!(enemies[0].id, 0); // room_x=0, spawn_index=0
+        assert_eq!(enemies[1].id, 1); // room_x=0, spawn_index=1
     }
 
     #[test]
     fn enemies_from_data_skips_boss_and_empty() {
         let data = vec![vec![EntityType::BossSpawn, EntityType::Empty]];
-        assert_eq!(enemies_from_data(&data).len(), 0);
+        assert_eq!(enemies_from_data(&data, 0).len(), 0);
 
         let data = vec![vec![EntityType::Empty, EntityType::Empty]];
-        assert_eq!(enemies_from_data(&data).len(), 0);
+        assert_eq!(enemies_from_data(&data, 0).len(), 0);
     }
 
     #[test]
@@ -179,12 +194,18 @@ mod tests {
             ],
         ];
         // 2 EnemySpawn + 2 PotionSpawn -> 4 enemies; BossSpawn and Empty are skipped.
-        assert_eq!(enemies_from_data(&data).len(), 4);
+        let enemies = enemies_from_data(&data, 0);
+        assert_eq!(enemies.len(), 4);
+        // Check IDs are sequential
+        assert_eq!(enemies[0].id, 0);
+        assert_eq!(enemies[1].id, 1);
+        assert_eq!(enemies[2].id, 2);
+        assert_eq!(enemies[3].id, 3);
     }
 
     #[test]
     fn enemy_set_rand_state_maps_random_mod_4() {
-        let mut enemy = Enemy::new(Vec2::new(0.0, 0.0), EnemyKind::Enemy);
+        let mut enemy = Enemy::new(0, Vec2::new(0.0, 0.0), EnemyKind::Enemy);
 
         enemy.set_rand_state(0);
         assert_eq!(enemy.state, EnemyState::Idle);

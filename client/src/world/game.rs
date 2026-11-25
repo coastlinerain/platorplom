@@ -15,8 +15,17 @@ use game::entities::player::Player;
 use game::level::Level;
 use game::maps::Map;
 use macroquad::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+/// Server-confirmed bullet data for reconciliation.
+#[derive(Debug, Clone)]
+pub struct ConfirmedBullet {
+    pub bullet_id: u16,
+    pub x: f32,
+    pub y: f32,
+    pub dir: f32,
+}
 
 pub struct World {
     pub id: Option<u8>,
@@ -28,7 +37,7 @@ pub struct World {
     pub network: Box<dyn PacketIO>,
     pub other_players: HashMap<u8, Nemesis>,
     pub enemy_bullets: Vec<Bullet>,
-    pub bullets: Vec<Bullet>, // own bullets (relocated from Player; server-authoritative)
+    pub bullets: Vec<Bullet>, // own bullets (server-authoritative)
     // --- prediction fields ---
     pub input_seq: u16,
     pub last_acked_seq: u16,
@@ -42,6 +51,9 @@ pub struct World {
     // Programmatic input injection (set by World::update in binary or by TestClient in e2e).
     pub move_left: bool,
     pub move_right: bool,
+    // --- NEW: Phase 2e ---
+    pub spawned_bullet_ids: HashSet<u16>, // deduplicate BulletSpawn packets
+    pub confirmed_bullets: HashMap<u16, ConfirmedBullet>, // seq -> confirmed bullet data
 }
 
 impl fmt::Debug for World {
@@ -76,7 +88,7 @@ impl World {
             })
             .collect();
 
-        let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data);
+        let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data, 0);
 
         Self {
             id: None,
@@ -95,6 +107,9 @@ impl World {
             jump_sticky: 0,
             shoot_sticky: 0,
             other_interp: HashMap::new(),
+            // NEW: Phase 2e
+            spawned_bullet_ids: HashSet::new(),
+            confirmed_bullets: HashMap::new(),
             pressed_jump: false,
             pressed_shoot: false,
             move_left: false,
@@ -132,30 +147,16 @@ impl World {
             self.pressed_jump = pressed_jump;
             self.pressed_shoot = pressed_shoot;
 
-            // Spawn own bullet from the authoritative dir when Z is pressed.
-            if pressed_shoot {
-                self.bullets.push(Bullet::new(
-                    self.player.pos + glam::Vec2::new(self.player.w / 2.0, self.player.h / 2.0),
-                    self.player.dir,
-                    self.player.id,
-                ));
-            }
+            // NOTE: Local bullet spawn on pressed_shoot is REMOVED (Phase 2e).
+            // Bullets are now spawned only when BulletSpawn packet arrives from server.
 
-            // Update own bullets.
+            // Update own bullets (physics + wall collision).
             for bullet in &mut self.bullets {
                 bullet.update(dt, level);
             }
 
-            // Collide own bullets with local enemies.
-            for bullet in &mut self.bullets {
-                for enemy in &mut self.enemies {
-                    if bullet.check_collision(enemy) {
-                        bullet.active = false;
-                        enemy.die();
-                        println!("Enemy hit!");
-                    }
-                }
-            }
+            // NOTE: Own-bullet vs enemy collision loop REMOVED (Phase 2e).
+            // Enemy death is now server-authoritative via EnemyDied packets.
 
             // Enemies still simulated client-side (not authoritative yet).
             for enemy in &mut self.enemies {

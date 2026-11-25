@@ -1,5 +1,4 @@
 use game::config::TICK_HZ;
-use game::entities::bullet::Bullet;
 use game::entities::player::PlayerInput;
 use game::maps::Map;
 use metroidvania_rust::network::prediction;
@@ -112,7 +111,7 @@ impl TestHarness {
         };
 
         let world_data = Map::new();
-        let mut world = World::new(world_data, Box::new(loopback));
+        let world = World::new(world_data, Box::new(loopback));
 
         self.server.spawn(player_id);
 
@@ -121,8 +120,7 @@ impl TestHarness {
         };
         let bytes = postcard::to_allocvec(&response).expect("serialize JoinResponse");
         let _ = tx_to_client.send(bytes);
-
-        handle_packet(&mut world, response);
+        // Note: Don't call handle_packet here — the client will process it during the first tick.
 
         let client = TestClient {
             handle,
@@ -225,12 +223,12 @@ impl TestHarness {
         }
 
         // Step 4: Server update.
-        let tick_shots = self.server.update(tick_dt);
+        let (shots, deaths) = self.server.update(tick_dt);
         // Accumulate shot counts (server never stores Bullet objects — D6).
         self.last_shots.clear();
-        for &(pid, dir) in &tick_shots {
-            *self.total_shots.entry(pid).or_insert(0) += 1;
-            self.last_shots.push((pid, dir));
+        for shot in &shots {
+            *self.total_shots.entry(shot.owner_id).or_insert(0) += 1;
+            self.last_shots.push((shot.owner_id, shot.dir));
         }
 
         // Step 5: Broadcast PlayerPos to ALL clients.
@@ -265,24 +263,40 @@ impl TestHarness {
             }
         }
 
-        // Step 6: Broadcast Action for shots to OTHER clients.
-        self.last_actions.clear();
-        for &(shooter_id, dir) in &self.last_shots {
-            for client in &self.clients {
-                if client.player_id == shooter_id {
-                    continue;
-                }
-                if let Some(idx) = self.clients.iter().position(|c| c.handle == client.handle) {
-                    let tx = &self.to_clients[idx];
-                    let packet = GamePacket::Action {
-                        id: shooter_id,
-                        kind: "shoot".to_string(),
-                        dir,
-                    };
-                    let bytes = postcard::to_allocvec(&packet).expect("serialize Action");
-                    let _ = tx.send(bytes);
-                    self.last_actions
-                        .push((client.handle, "shoot".to_string(), dir));
+        // Step 6: Broadcast BulletSpawn to ALL clients (including shooter) via reliable_ordered.
+        for shot in &shots {
+            let packet = GamePacket::BulletSpawn {
+                bullet_id: shot.bullet_id,
+                x: shot.x,
+                y: shot.y,
+                dir: shot.dir,
+                owner_id: shot.owner_id,
+                seq: shot.seq,
+            };
+            let bytes = postcard::to_allocvec(&packet).expect("serialize BulletSpawn");
+            for tx in &self.to_clients {
+                let _ = tx.send(bytes.clone());
+            }
+        }
+
+        // Step 6b: Broadcast EnemyDied to clients in the same room via reliable_ordered.
+        for death in &deaths {
+            let packet = GamePacket::EnemyDied {
+                enemy_id: death.enemy_id,
+                room_x: death.room_x,
+                room_y: death.room_y,
+            };
+            let bytes = postcard::to_allocvec(&packet).expect("serialize EnemyDied");
+            for (idx, tx) in self.to_clients.iter().enumerate() {
+                let client_id = self.clients[idx].player_id;
+                let client_coords = self
+                    .server
+                    .coords()
+                    .get(&client_id)
+                    .copied()
+                    .unwrap_or((0, 0));
+                if client_coords == (death.room_x, death.room_y) {
+                    let _ = tx.send(bytes.clone());
                 }
             }
         }
@@ -314,19 +328,10 @@ impl TestHarness {
 
                     client.world.player.update(tick_dt, level, &local_input);
 
-                    // Spawn own bullet when pressed_shoot is true (mirrors World::update).
-                    if client.world.pressed_shoot {
-                        client.world.bullets.push(Bullet::new(
-                            client.world.player.pos
-                                + glam::Vec2::new(
-                                    client.world.player.w / 2.0,
-                                    client.world.player.h / 2.0,
-                                ),
-                            client.world.player.dir,
-                            client.world.player.id,
-                        ));
-                    }
+                    // NOTE: Local bullet spawn on pressed_shoot is REMOVED (Phase 2e).
+                    // Bullets are now spawned only when BulletSpawn packet arrives from server.
 
+                    // Update own bullets (physics + wall collision).
                     for bullet in &mut client.world.bullets {
                         bullet.update(tick_dt, level);
                     }
@@ -476,6 +481,18 @@ impl TestHarness {
             .iter_mut()
             .find(|c| c.handle == handle)
             .expect("client not found")
+    }
+
+    /// Inject a server-to-client packet directly into a client's receive channel.
+    /// Useful for testing server-originated packets like BulletSpawn, EnemyDied, etc.
+    pub fn inject_server_packet(&mut self, handle: ClientHandle, packet: GamePacket) {
+        let idx = self
+            .clients
+            .iter()
+            .position(|c| c.handle == handle)
+            .expect("client not found");
+        let bytes = postcard::to_allocvec(&packet).expect("serialize packet");
+        let _ = self.to_clients[idx].send(bytes);
     }
 
     /// Disconnect a client: remove from server, broadcast Leave to remaining
