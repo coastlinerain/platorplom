@@ -296,3 +296,10 @@ Each box is a small, independently verifiable step. The `implementer` fills the 
 - **Server loop**: No changes needed. Verification comment references spec decision D3 for traceability.
 - **Test location**: Client is a binary crate; unit tests go in `client/src/world/game.rs` under `#[cfg(test)]`. Integration tests go in `e2e/tests/`.
 - **Consistent naming**: Use "sim tick" throughout (not "simulation step").
+
+## Review follow-up fix (post-implementation, 2026-11-25)
+
+- **What**: In `client/src/world/lib.rs`, after a room transition teleports the player (`check_level_transitions`, inside the `if changed` block after `load_current_level`) and after the death respawn teleport (`handle_death`, right after `player.pos = (100.0, 100.0)`), reset `world.prev_player_pos = world.player.pos` and `world.prev_player_dir = world.player.dir`.
+- **Why**: `World::update` stores `prev_player_*` *before* simulating, then `check_level_transitions` teleports `player.pos` afterward. On the transition frame, `draw(alpha)` would lerp from the old-room position to the new-room entry position for one frame while the level is already rendered at the new coords — a one-frame visual glitch. Snapping the interpolation source to the post-teleport position makes `draw` render at the new spawn.
+- **Rust concepts**: mutable-field assignment on `&mut World`; disjoint field writes (`world.prev_player_pos`/`prev_player_dir` vs `world.player.pos`/`dir`); the borrow of `p: &mut world.player` has already ended (NLL) before the `if changed` block, so re-reading `world.player.pos` is allowed.
+- **Watch out**: The death path (`handle_death`) is called *before* the prev-state store in `update`, so it was already correct — the added reset there is purely defensive and preserves the invariant that `prev_player_*` never holds a stale pre-teleport position. No test was changed; existing interpolation tests are unaffected because they set `prev_player_*` explicitly.
