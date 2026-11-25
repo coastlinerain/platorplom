@@ -102,7 +102,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 1 — Move transport code into the lib
 
-- [ ] done
+- [x] done
 - **Files**: create `client/src/network/transport.rs`; edit `client/src/network/mod.rs`; edit `client/src/lib.rs`.
 - **Change**:
   - Move `RealPacketIO`, `HeadlessPacketIO`, and `make_transport_factory`
@@ -125,10 +125,31 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   and the re-export is in `lib.rs` (T5, T6).
 - **Test**: T5, T6 (grep) + `cargo check -p metroidvania-rust` (still compiles with the lib items added and `main.rs` unchanged).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Created `client/src/network/transport.rs` and moved `RealPacketIO`,
+    `HeadlessPacketIO`, and `make_transport_factory` there from `main.rs`. The two
+    structs stay module-private; `make_transport_factory` is now
+    `pub fn ... -> TransportFactory`. The four `log_packet` call sites now use
+    `crate::network::logging::log_packet` (imported as the short name
+    `log_packet`). Registered `pub mod transport;` in `network/mod.rs` and added
+    `pub use network::transport::make_transport_factory;` to `lib.rs`. `main.rs`
+    was left untouched (its private copies still compile).
+  - Why: Both binaries need one shared transport implementation, and only the
+    lib is linkable from both `main.rs` (GUI) and the future `main_headless.rs`.
+    Moving it now (before the bin split) lets `cargo check` prove the lib items
+    compile without touching `main.rs`.
+  - Rust concepts: module privacy (module-private structs vs. a `pub` fn exposed
+    only via the factory), re-exports (`pub use`), trait objects
+    (`Box<dyn PacketIO>` / `TransportFactory = Box<dyn Fn() -> Box<dyn PacketIO>>`),
+    and `use` paths (`crate::`-relative vs. the previous external
+    `metroidvania_rust::` path now that the code is inside the lib).
+  - Watch out: the plan's "add `use crate::network::logging::log_packet`" line
+    would be an *unused* import if the call sites stayed fully-qualified
+    (`crate::network::logging::log_packet(...)`). To keep `clippy -D warnings`
+    clean I imported the short name and called `log_packet(...)`; likewise
+    `protocol::GamePacket` is imported and used as the short name `GamePacket`.
+    This is a deliberate minor deviation from the literal "rewrite to
+    `crate::network::logging::log_packet(...)`" wording, not from the plan's
+    intent (internal paths, no unused imports).
 
 ### Box 2 — Cargo feature/bin split + the windowless headless binary
 
