@@ -40,6 +40,7 @@ fn handle_death(world: &mut World) {
     // Clear bullet tracking on death/respawn
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
+    world.pending_enemy_deaths.clear();
     load_current_level(world);
 }
 
@@ -49,6 +50,10 @@ fn load_current_level(world: &mut World) {
     world.enemy_bullets.clear();
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
+    world.pending_enemy_deaths.clear();
+    // Reset sticky edges to avoid carry-over from previous room
+    world.jump_sticky = 0;
+    world.shoot_sticky = 0;
 
     // Request authoritative enemy state from server
     let (rx, ry) = world.current_coords;

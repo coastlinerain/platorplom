@@ -26,7 +26,9 @@ fn test_no_duplicate_join_request() {
     assert_eq!(
         harness.server.players().len(),
         1,
-        "Server should have exactly 1 player (no duplicate join)"
+        "Server should have exactly Planner is fixing all 5 issues (session @Write Phase 2e plan). Pipeline:
+Stage	Status
+1. Spec1 player (no duplicate join)"
     );
 
     // Also verify the client only has one assigned id

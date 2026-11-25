@@ -65,6 +65,7 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.shoot_sticky = 0;
             world.spawned_bullet_ids.clear();
             world.confirmed_bullets.clear();
+            world.pending_enemy_deaths.clear();
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -210,9 +211,14 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             // Only process if we're in the same room
             if room_x as usize == world.current_coords.0
                 && room_y as usize == world.current_coords.1
-                && let Some(enemy) = world.enemies.iter_mut().find(|e| e.id == enemy_id)
             {
-                enemy.die();
+                if let Some(enemy) = world.enemies.iter_mut().find(|e| e.id == enemy_id) {
+                    enemy.die();
+                } else {
+                    // Enemy not yet spawned (race condition: EnemyDied arrived before EnemyStateResponse)
+                    // Queue the death to be applied when the enemy spawns.
+                    world.pending_enemy_deaths.insert(enemy_id);
+                }
             }
             // If room mismatch, ignore silently — room load will sync state
         }
@@ -234,11 +240,15 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 for (i, (enemy_id, alive, _spawn_x, _spawn_y)) in enemies.into_iter().enumerate() {
                     if alive && i < template_enemies.len() {
                         let template = &template_enemies[i];
-                        let enemy = game::entities::enemy::Enemy::new(
+                        let mut enemy = game::entities::enemy::Enemy::new(
                             enemy_id,
                             template.pos,
                             template.kind,
                         );
+                        // Apply any pending deaths that arrived before this enemy was spawned
+                        if world.pending_enemy_deaths.remove(&enemy_id) {
+                            enemy.die();
+                        }
                         world.enemies.push(enemy);
                     }
                 }

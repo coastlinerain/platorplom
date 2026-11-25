@@ -327,13 +327,15 @@ impl ServerWorld {
     }
 
     /// Get enemy state for a room (for EnemyStateResponse).
-    /// Returns Vec<(enemy_id, alive, spawn_x, spawn_y)>.
+    /// Returns Vec<(enemy_id, alive, spawn_x, spawn_y)> sorted by enemy_id for deterministic ordering.
     pub fn get_enemy_state(&self, room_x: u8, room_y: u8) -> Vec<(u8, bool, f32, f32)> {
         self.enemies
             .get(&(room_x, room_y))
             .map(|enemies| {
-                enemies
-                    .iter()
+                let mut sorted: Vec<_> = enemies.iter().collect();
+                sorted.sort_by_key(|e| e.id);
+                sorted
+                    .into_iter()
                     .map(|e| (e.id, e.alive, e.spawn_pos.0, e.spawn_pos.1))
                     .collect()
             })

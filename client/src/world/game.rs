@@ -54,6 +54,8 @@ pub struct World {
     // --- NEW: Phase 2e ---
     pub spawned_bullet_ids: HashSet<u16>, // deduplicate BulletSpawn packets
     pub confirmed_bullets: HashMap<u16, ConfirmedBullet>, // seq -> confirmed bullet data
+    // Enemy deaths received before enemy was spawned (race condition fix)
+    pub pending_enemy_deaths: HashSet<u8>,
 }
 
 impl fmt::Debug for World {
@@ -110,6 +112,7 @@ impl World {
             // NEW: Phase 2e
             spawned_bullet_ids: HashSet::new(),
             confirmed_bullets: HashMap::new(),
+            pending_enemy_deaths: HashSet::new(),
             pressed_jump: false,
             pressed_shoot: false,
             move_left: false,
