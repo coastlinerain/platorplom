@@ -43,3 +43,18 @@ Do NOT ask about things you can determine yourself from the code or AGENTS.md
 (e.g. existing types, naming conventions, whether a file exists). Batch related
 questions into one `question` call. If you ask, pause and wait for the answer
 before finalizing the spec.
+
+## Skills
+
+Load these skills (skill tool) as the situation calls for them:
+
+- `codebase-design` — reason about module seams and interfaces when the spec
+  introduces or restructures an abstraction; place the test boundary at the
+  highest sensible seam.
+- `domain-modeling` — keep terminology consistent and record ADR-worthy decisions
+  in `docs/adr/`.
+- `research` — when the feature depends on facts outside the repo (Rust/std APIs,
+  netcode techniques, library docs), investigate primary sources and capture the
+  findings as a Markdown note in the repo.
+- `prototype` — sanity-check a design question (state model, logic) with throwaway
+  code before committing to the spec.

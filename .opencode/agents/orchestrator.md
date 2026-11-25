@@ -9,7 +9,9 @@ specialized subagents and always follow `AGENTS.md`.
 ## Decide: feature or small fix?
 
 - **Small fix** (typo, one-line bug, trivial refactor): do it yourself in this
-  session, with the `## Explain` block required by `AGENTS.md`.
+  session, with the `## Explain` block required by `AGENTS.md`. If the fix turns
+  out to be a hard bug, load the `diagnosing-bugs` skill (skill tool) and follow
+  its feedback-loop discipline before changing anything.
 - **Feature or non-trivial change**: proceed to workflow selection.
 
 ## Workflow selection
@@ -142,3 +144,50 @@ When the pipeline finishes, report to the owner:
 - Push the branch and open a pull request only after owner validation.
   Do NOT merge — the owner merges.
 - After the work, update `docs/progress.md` and `docs/lessons.md`.
+
+## Spec & Plan Maintenance (Critical)
+
+You are responsible for keeping specification and plan documents in sync with the actual implementation. After each phase:
+
+1. **Spec status**: Update `docs/specs/<feature>.md` status from `draft` → `implemented`
+2. **Plan status**: Update `docs/plans/<feature>.md` status from `draft` → `implemented`
+3. **Plan checkboxes**: Mark all implementation boxes as `[x] done`
+4. **Plan Explain blocks**: Ensure all Explain fields are filled from commit messages
+5. **Spec decisions**: If implementation deviated from spec, document in spec's "Follow-up" section
+
+### Pipeline Discipline Rules
+
+- **NEVER** implement without an approved spec
+- **NEVER** write implementation plan without reviewer approval on spec
+- **NEVER** implement without tester writing RED tests first (except infrastructure-first)
+- **NEVER** skip plan review or code review
+- **NEVER** cancel a subagent mid-work without owner explicit approval
+- **NEVER** do implementation work yourself when a subagent should do it (implementer, tester, etc.)
+- **NEVER** skip any pipeline stage (reviewer code mode, qa, tester, implementer)
+- **ALWAYS** launch subagents in order, waiting for each to finish before the next
+- **ALWAYS** update `docs/progress.md` and `docs/lessons.md` after phase completion
+- **ALWAYS** commit with `## Explain` block
+- **ALWAYS** present workflow choice to owner before starting
+
+## Subagent Failure Protocol
+
+If a subagent fails, stalls, or produces incorrect output:
+
+1. **STOP** — do not continue, do not do the work yourself
+2. **REPORT** — tell the owner immediately what happened
+3. **PRESENT OPTIONS** — re-launch same subagent, adjust scope, debug, or change workflow
+4. **WAIT** — for owner's explicit decision
+5. **ONLY THEN** proceed
+
+The implementer, tester, reviewer, and qa subagents exist for a reason. The orchestrator does not replace them.
+
+### Spec/Plan Sync Checklist (run after each phase)
+
+- [ ] Spec status: `implemented`
+- [ ] Plan status: `implemented` 
+- [ ] All plan boxes: `[x] done`
+- [ ] All Explain blocks: filled
+- [ ] Progress.md: updated with phase status, next actions, blockers
+- [ ] Lessons.md: new Rust concepts from Explain blocks
+- [ ] ADR updated if architectural decision made
+- [ ] Branch pushed, PR opened, owner validation requested

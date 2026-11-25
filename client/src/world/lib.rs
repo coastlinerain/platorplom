@@ -37,10 +37,23 @@ fn handle_death(world: &mut World) {
     println!("You died! Returning to start...");
     world.current_coords = (0, 0);
     world.player.pos = glam::Vec2::new(100.0, 100.0);
+    // Snap the interpolation source to the respawn position so the next
+    // `draw(alpha)` renders at the spawn point instead of lerping from a
+    // stale pre-death position (defensive — the prev-state store in
+    // `World::update` already runs after this, but keep the invariant local).
+    world.prev_player_pos = world.player.pos;
+    world.prev_player_dir = world.player.dir;
     // Clear bullet tracking on death/respawn
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
     world.pending_enemy_deaths.clear();
+    // Reset clock sync on death
+    world.client_tick = 0;
+    world.server_tick_offset = 0;
+    world.clock_offset_ms = 0;
+    world.last_server_tick = 0;
+    world.last_server_time_ms = 0;
+    world.last_acked_server_tick = 0;
     load_current_level(world);
 }
 
@@ -51,6 +64,13 @@ fn load_current_level(world: &mut World) {
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
     world.pending_enemy_deaths.clear();
+    // Reset clock sync on room transition
+    world.client_tick = 0;
+    world.server_tick_offset = 0;
+    world.clock_offset_ms = 0;
+    world.last_server_tick = 0;
+    world.last_server_time_ms = 0;
+    world.last_acked_server_tick = 0;
     // Reset sticky edges to avoid carry-over from previous room
     world.jump_sticky = 0;
     world.shoot_sticky = 0;
@@ -120,5 +140,11 @@ pub fn check_level_transitions(world: &mut World) {
             world.current_coords.0, world.current_coords.1
         );
         load_current_level(world);
+        // Snap the interpolation source to the post-teleport entry position so
+        // `draw(alpha)` renders at the new-room spawn instead of lerping from
+        // the old-room position for one frame (the level is already drawn at
+        // the new coords).
+        world.prev_player_pos = world.player.pos;
+        world.prev_player_dir = world.player.dir;
     }
 }

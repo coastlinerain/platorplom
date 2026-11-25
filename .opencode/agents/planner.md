@@ -46,3 +46,11 @@ decision). Give a recommendation as the first option.
 Do NOT ask about things the spec already decided or you can read from the code.
 Batch related questions into one `question` call, and pause for the answer before
 finalizing the plan.
+
+## Skills
+
+Load these skills (skill tool) as needed:
+
+- `codebase-design` — identify seams and place test boundaries at the right
+  interface when structuring plan boxes and test cases.
+- `domain-modeling` — keep terminology consistent with the spec and ADRs.

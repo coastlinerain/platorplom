@@ -76,3 +76,9 @@ commands above.
 Severity-ordered findings (blocker / major / minor / nit), each with: what it is,
 why it matters, and a concrete recommendation. Clearly mark anything that would
 change game behavior or needs an owner decision. Do not edit files.
+
+## Skills
+
+Load the `grilling` skill (skill tool) when stress-testing process or design
+decisions — surface the trade-offs and assumptions the owner should check before
+accepting the work.

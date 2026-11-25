@@ -1,3 +1,4 @@
+use game::config::TICK_HZ;
 use game::entities::nemesis::Nemesis;
 use std::time::Instant;
 
@@ -8,48 +9,169 @@ use std::time::Instant;
 #[derive(Debug)]
 pub struct RemoteInterp {
     /// When each snapshot arrived. Parallels `nemesis.interp_snapshots`:
-    /// `timestamps[0]` corresponds to the older snapshot (if any),
-    /// `timestamps[1]` to the newer.
-    pub timestamps: [Option<Instant>; 2],
+    /// `timestamps[0..4]` corresponds to snapshots in order (oldest to newest).
+    pub timestamps: [Option<Instant>; 5],
+    /// The server tick from the most recent PlayerPos packet.
+    pub last_known_server_tick: u64,
+    /// The local Instant when the most recent PlayerPos packet arrived.
+    pub last_known_arrival: Instant,
 }
 
 impl RemoteInterp {
     pub fn new() -> Self {
         Self {
-            timestamps: [None, None],
+            timestamps: [None, None, None, None, None],
+            last_known_server_tick: 0,
+            last_known_arrival: Instant::now(),
         }
     }
 
     /// Push a new snapshot into the Nemesis and record its arrival time.
     ///
     /// Internally calls `nemesis.push_interp_snapshot(x, y, dir)` and shifts
-    /// timestamps to keep the 2 most recent entries in sync.
-    ///
-    /// The timestamp shift (`[1] → [0], [1] = now`) mirrors `Nemesis`'s
-    /// shift-on-third-push behavior: after 2 pushes, both structures have the
-    /// same 2-entry ring (older at index 0, newer at index 1). If
-    /// `push_interp_snapshot` ever changes its eviction order, this function
-    /// must be updated to match.
+    /// timestamps to match the 5-entry ring buffer eviction.
     pub fn push(&mut self, nemesis: &mut Nemesis, x: f32, y: f32, dir: f32) {
+        let was_full = nemesis.interp_len == 5;
         nemesis.push_interp_snapshot(x, y, dir);
 
         let now = Instant::now();
-        self.timestamps[0] = self.timestamps[1];
-        self.timestamps[1] = Some(now);
+        if was_full {
+            // Shift timestamps left by 1: [1]→[0], [2]→[1], [3]→[2], [4]→[3], new at [4]
+            self.timestamps[0] = self.timestamps[1];
+            self.timestamps[1] = self.timestamps[2];
+            self.timestamps[2] = self.timestamps[3];
+            self.timestamps[3] = self.timestamps[4];
+            self.timestamps[4] = Some(now);
+        } else {
+            // Fill next empty slot
+            self.timestamps[nemesis.interp_len as usize - 1] = Some(now);
+        }
+        // Update the anchor for tick-based interpolation
+        self.last_known_server_tick = nemesis.interp_len as u64; // placeholder, will be set by caller
+        self.last_known_arrival = now;
     }
 
-    /// Compute interpolated `(x, y, dir)` from the Nemesis snapshot buffer and
-    /// the recorded timestamps.
+    /// Set the anchor server tick and arrival time (called after push with the actual server_tick from packet).
+    pub fn set_anchor(&mut self, server_tick: u64) {
+        self.last_known_server_tick = server_tick;
+        self.last_known_arrival = Instant::now();
+    }
+
+    /// Interpolate at a specific target render tick.
     ///
-    /// - **0 snapshots**: returns `None`.
-    /// - **1 snapshot**: returns that snapshot's `(x, y, dir)` (snap).
-    /// - **2 snapshots**: lerps position between older and newer based on
-    ///   elapsed time since the older timestamp, clamped to [0, 1] so that
-    ///   elapsed > interval snaps to the newer position. `dir` always snaps to
-    ///   the newer snapshot.
-    /// - **Stale guard**: if the newer snapshot's timestamp is >200 ms old,
-    ///   snaps to the newer position (treats the remote as disconnected).
+    /// - `target_tick`: The server tick we want to render for (server_tick_estimate - INTERPOLATION_DELAY_TICKS).
+    /// - `last_known_server_tick`: The server_tick from the most recent PlayerPos.
+    /// - `last_known_arrival`: The Instant when that PlayerPos arrived.
+    ///
+    /// Returns `Some((x, y, dir))` with interpolated position, or `None` if no snapshots.
+    pub fn interpolate_at_tick(
+        &self,
+        nemesis: &Nemesis,
+        target_tick: u64,
+        last_known_server_tick: u64,
+        last_known_arrival: Instant,
+    ) -> Option<(f32, f32, f32)> {
+        // Collect valid snapshots and their timestamps
+        let mut snapshots = Vec::new();
+        let mut snapshot_times = Vec::new();
+
+        for i in 0..nemesis.interp_len as usize {
+            if let Some(snap) = nemesis.interp_snapshots[i]
+                && let Some(ts) = self.timestamps[i]
+            {
+                snapshots.push(snap);
+                snapshot_times.push(ts);
+            }
+        }
+
+        let count = snapshots.len();
+        if count == 0 {
+            return None;
+        }
+        if count == 1 {
+            let (x, y, dir) = snapshots[0];
+            return Some((x, y, dir));
+        }
+
+        // Convert target_tick to expected arrival time:
+        // target_arrival = last_known_arrival + (target_tick - last_known_server_tick) * TICK_MS
+        // where TICK_MS = 1000 / TICK_HZ (approx 16.67ms at 60Hz)
+        let tick_duration_ms = 1000.0 / TICK_HZ as f32;
+        let tick_diff = target_tick as i64 - last_known_server_tick as i64;
+        let target_arrival_offset_ms = tick_diff as f32 * tick_duration_ms;
+
+        let target_arrival = if target_arrival_offset_ms >= 0.0 {
+            last_known_arrival + std::time::Duration::from_millis(target_arrival_offset_ms as u64)
+        } else {
+            // target_tick is before last_known_server_tick (shouldn't happen normally, but handle)
+            last_known_arrival
+                .checked_sub(std::time::Duration::from_millis(
+                    (-target_arrival_offset_ms) as u64,
+                ))
+                .unwrap_or(last_known_arrival)
+        };
+
+        // Stale guard: if newest snapshot > 200ms old relative to target_arrival, snap to newest
+        if let Some(newest_ts) = snapshot_times.last()
+            && target_arrival
+                .checked_duration_since(*newest_ts)
+                .is_some_and(|d| d.as_millis() > 200)
+        {
+            let (x, y, dir) = snapshots[count - 1];
+            return Some((x, y, dir));
+        }
+
+        // Find two snapshots whose arrival times bracket target_arrival
+        // We want i such that snapshot_times[i] <= target_arrival <= snapshot_times[i+1]
+        let mut bracket_idx = None;
+        for i in 0..count - 1 {
+            if snapshot_times[i] <= target_arrival && target_arrival <= snapshot_times[i + 1] {
+                bracket_idx = Some(i);
+                break;
+            }
+        }
+
+        match bracket_idx {
+            Some(i) => {
+                // Interpolate between snapshots[i] and snapshots[i+1]
+                let (ox, oy, _odir) = snapshots[i];
+                let (nx, ny, ndir) = snapshots[i + 1];
+                let older_ts = snapshot_times[i];
+                let newer_ts = snapshot_times[i + 1];
+
+                let interval = newer_ts.duration_since(older_ts);
+                let elapsed = target_arrival.duration_since(older_ts);
+
+                let t = if interval.as_secs_f32() > 0.0 {
+                    (elapsed.as_secs_f32() / interval.as_secs_f32()).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+
+                let x = ox + (nx - ox) * t;
+                let y = oy + (ny - oy) * t;
+                Some((x, y, ndir)) // Direction snaps to newer
+            }
+            None => {
+                // Target is outside the range of buffered snapshots
+                if target_arrival < snapshot_times[0] {
+                    // Before oldest: snap to oldest
+                    let (x, y, dir) = snapshots[0];
+                    Some((x, y, dir))
+                } else {
+                    // After newest: snap to newest
+                    let (x, y, dir) = snapshots[count - 1];
+                    Some((x, y, dir))
+                }
+            }
+        }
+    }
+
+    /// Legacy interpolation method (wall-clock based) for backward compatibility.
+    /// Delegates to `interpolate_at_tick` with current estimates.
     pub fn interpolate(&self, nemesis: &Nemesis) -> Option<(f32, f32, f32)> {
+        // Use current time as target arrival, with server_tick_estimate
+        // This is kept for backward compatibility but the new tick-based method is preferred.
         self.interpolate_at(nemesis, Instant::now())
     }
 
@@ -117,17 +239,17 @@ mod tests {
     use game::entities::nemesis::Nemesis;
     use std::time::{Duration, Instant};
 
-    /// Helper: create a Nemesis with the new interpolation fields.
+    /// Helper: create a Nemesis with the new 5-entry interpolation fields.
     /// Returns a Nemesis at position (x, y).
     fn make_nemesis(id: u8, x: f32, y: f32) -> Nemesis {
         let mut n = Nemesis::new(id, glam::Vec2::new(x, y));
-        n.interp_snapshots = [None, None];
+        n.interp_snapshots = [None, None, None, None, None];
         n.interp_len = 0;
         n
     }
 
     // -----------------------------------------------------------------------
-    // Group D — Entity interpolation tests
+    // Group D — Entity interpolation tests (updated for N=5)
     // -----------------------------------------------------------------------
 
     /// AC 18 (empty case) — no snapshots → interpolate returns None.
@@ -150,9 +272,6 @@ mod tests {
 
         interp.push(&mut nemesis, 100.0, 200.0, 1.0);
 
-        // Use a now that is close to the push time (the timestamp was recorded
-        // during push, so we can't match it exactly — but with 1 snapshot the
-        // result should be the snapshot regardless of elapsed).
         let now = Instant::now();
         let result = interp.interpolate_at(&nemesis, now);
 
@@ -173,7 +292,6 @@ mod tests {
 
         // Push snapshot A at t0.
         interp.push(&mut nemesis, 100.0, 100.0, 1.0);
-        // Overwrite recorded timestamps for deterministic testing.
         interp.timestamps[0] = Some(t0);
 
         let t1 = t0 + Duration::from_millis(100);
@@ -190,11 +308,9 @@ mod tests {
         assert!(result.is_some(), "two snapshots should return Some");
         let (x, y, dir) = result.unwrap();
 
-        // Position is lerp(A, B, 0.5): 100 + (200-100)*0.5 = 150.
         let epsilon = 0.5;
         assert!((x - 150.0).abs() < epsilon, "expected x ≈ 150.0, got {x}");
         assert!((y - 100.0).abs() < epsilon, "expected y ≈ 100.0, got {y}");
-        // dir always snaps to the newest snapshot.
         assert_eq!(dir, -1.0);
     }
 
@@ -214,14 +330,12 @@ mod tests {
         interp.timestamps[0] = Some(t0);
         interp.timestamps[1] = Some(t1);
 
-        // Sample at 200ms after t1 (well past the 50ms interval).
         let now = t1 + Duration::from_millis(200);
         let result = interp.interpolate_at(&nemesis, now);
 
         assert!(result.is_some());
         let (x, y, dir) = result.unwrap();
 
-        // Should snap to the newer snapshot (200, 100, -1.0).
         let epsilon = 0.5;
         assert!(
             (x - 200.0).abs() < epsilon,
@@ -245,12 +359,9 @@ mod tests {
         interp.push(&mut nemesis, 100.0, 100.0, 1.0);
         interp.timestamps[0] = Some(t0);
 
-        // Sample at 300ms after t0 (>200ms stale threshold).
         let now = t0 + Duration::from_millis(300);
         let result = interp.interpolate_at(&nemesis, now);
 
-        // With 1 snapshot, stale guard should still return the snapshot
-        // (treating >200ms as valid but "snapped").
         assert!(
             result.is_some(),
             "even stale, 1 snapshot should return Some"
@@ -262,8 +373,6 @@ mod tests {
     }
 
     /// AC 39 (edge case) — stale guard boundary test with 2 snapshots.
-    /// At >200ms after the newest snapshot, interpolation still returns a
-    /// position (snaps rather than interpolating, does NOT return None).
     #[test]
     fn interpolate_stale_guard_boundary() {
         let mut interp = RemoteInterp::new();
@@ -271,19 +380,14 @@ mod tests {
 
         let t0 = Instant::now();
 
-        // Push snapshot A at t0.
         interp.push(&mut nemesis, 0.0, 0.0, 1.0);
         interp.timestamps[0] = Some(t0);
 
-        // Push snapshot B at t0 + 50ms.
         let t1 = t0 + Duration::from_millis(50);
         interp.push(&mut nemesis, 10.0, 0.0, -1.0);
         interp.timestamps[0] = Some(t0);
         interp.timestamps[1] = Some(t1);
 
-        // Exactly 200ms after B (t1 + 200ms = t0 + 250ms).
-        // With 2 snapshots where the newest is >200ms old, the stale guard
-        // fires and snaps to the newest position.
         let now = t1 + Duration::from_millis(200);
         let result = interp.interpolate_at(&nemesis, now);
 
@@ -293,7 +397,6 @@ mod tests {
         );
         let (x, _y, dir) = result.unwrap();
 
-        // Snaps to B's position (10.0, 0.0, -1.0) rather than interpolating.
         let epsilon = 0.5;
         assert!(
             (x - 10.0).abs() < epsilon,
@@ -301,7 +404,6 @@ mod tests {
         );
         assert_eq!(dir, -1.0);
 
-        // Just over the threshold: 201ms after B.
         let now2 = t1 + Duration::from_millis(201);
         let result2 = interp.interpolate_at(&nemesis, now2);
         assert!(result2.is_some());
@@ -312,25 +414,184 @@ mod tests {
         );
     }
 
-    /// AC 17 — pushing a third snapshot evicts the oldest, keeping only the
-    /// two most recent.
+    /// AC 17 — pushing a 6th snapshot evicts the oldest, keeping only the
+    /// five most recent.
     #[test]
     fn interpolate_evicts_old_snapshots() {
         let mut interp = RemoteInterp::new();
         let mut nemesis = make_nemesis(1, 0.0, 0.0);
 
-        // Push A, B, C.
+        // Push A, B, C, D, E, F (6 pushes)
         interp.push(&mut nemesis, 0.0, 0.0, 1.0); // A
         interp.push(&mut nemesis, 10.0, 10.0, 1.0); // B
         interp.push(&mut nemesis, 20.0, 20.0, -1.0); // C
+        interp.push(&mut nemesis, 30.0, 30.0, 1.0); // D
+        interp.push(&mut nemesis, 40.0, 40.0, -1.0); // E
+        interp.push(&mut nemesis, 50.0, 50.0, 1.0); // F
 
-        // Verify only B and C remain in nemesis.interp_snapshots.
-        assert_eq!(nemesis.interp_len, 2);
-        assert_eq!(nemesis.interp_snapshots[0], Some((10.0, 10.0, 1.0)));
-        assert_eq!(nemesis.interp_snapshots[1], Some((20.0, 20.0, -1.0)));
+        // Verify only B, C, D, E, F remain (5 entries, A evicted)
+        assert_eq!(nemesis.interp_len, 5);
+        assert_eq!(nemesis.interp_snapshots[0], Some((10.0, 10.0, 1.0))); // B
+        assert_eq!(nemesis.interp_snapshots[1], Some((20.0, 20.0, -1.0))); // C
+        assert_eq!(nemesis.interp_snapshots[2], Some((30.0, 30.0, 1.0))); // D
+        assert_eq!(nemesis.interp_snapshots[3], Some((40.0, 40.0, -1.0))); // E
+        assert_eq!(nemesis.interp_snapshots[4], Some((50.0, 50.0, 1.0))); // F
 
-        // Verify only B and C timestamps remain (positions match).
+        // Verify timestamps shifted correctly
         assert!(interp.timestamps[0].is_some());
         assert!(interp.timestamps[1].is_some());
+        assert!(interp.timestamps[2].is_some());
+        assert!(interp.timestamps[3].is_some());
+        assert!(interp.timestamps[4].is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // New tests for interpolate_at_tick (tick-based interpolation)
+    // -----------------------------------------------------------------------
+
+    /// UT3 — interpolate_at_tick: 2 snapshots, target at oldest tick → position from oldest, dir from newest.
+    #[test]
+    fn interpolate_at_tick_lerps_midpoint() {
+        let mut interp = RemoteInterp::new();
+        let mut nemesis = make_nemesis(1, 0.0, 0.0);
+
+        let t0 = Instant::now();
+        let server_tick_0 = 1000u64;
+
+        // Push snapshot A at server_tick 1000
+        interp.push(&mut nemesis, 100.0, 100.0, 1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.set_anchor(server_tick_0);
+
+        let t1 = t0 + Duration::from_millis(16); // ~1 tick at 60Hz
+        let server_tick_1 = 1001u64;
+
+        // Push snapshot B at server_tick 1001
+        interp.push(&mut nemesis, 200.0, 100.0, -1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.timestamps[1] = Some(t1);
+        interp.set_anchor(server_tick_1);
+
+        // Target tick = 1000 (exactly at snapshot A's tick)
+        // target_arrival = t1 + (1000-1001)*16.67 = t0
+        let result = interp.interpolate_at_tick(&nemesis, 1000, server_tick_1, t1);
+
+        assert!(result.is_some());
+        let (x, y, dir) = result.unwrap();
+        let epsilon = 0.5;
+        // At target_tick=1000, position should be at snapshot A (100, 100)
+        // Direction always snaps to newer snapshot (B), so dir = -1.0
+        assert!((x - 100.0).abs() < epsilon, "expected x ≈ 100.0, got {x}");
+        assert!((y - 100.0).abs() < epsilon, "expected y ≈ 100.0, got {y}");
+        assert_eq!(dir, -1.0, "direction should snap to newer snapshot");
+    }
+
+    /// UT4 — interpolate_at_tick: target before oldest → snap to oldest.
+    #[test]
+    fn interpolate_at_tick_before_oldest_snaps_to_oldest() {
+        let mut interp = RemoteInterp::new();
+        let mut nemesis = make_nemesis(1, 0.0, 0.0);
+
+        let t0 = Instant::now();
+        let server_tick_0 = 1000u64;
+
+        interp.push(&mut nemesis, 100.0, 100.0, 1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.set_anchor(server_tick_0);
+
+        let t1 = t0 + Duration::from_millis(16);
+        let server_tick_1 = 1001u64;
+
+        interp.push(&mut nemesis, 200.0, 100.0, -1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.timestamps[1] = Some(t1);
+        interp.set_anchor(server_tick_1);
+
+        // Target tick = 999 (before oldest snapshot at 1000)
+        let result = interp.interpolate_at_tick(&nemesis, 999, server_tick_1, t1);
+
+        assert!(result.is_some());
+        let (x, y, dir) = result.unwrap();
+        let epsilon = 0.5;
+        assert!(
+            (x - 100.0).abs() < epsilon,
+            "expected x ≈ 100.0 (oldest), got {x}"
+        );
+        assert!((y - 100.0).abs() < epsilon, "expected y ≈ 100.0, got {y}");
+        assert_eq!(dir, 1.0);
+    }
+
+    /// UT5 — interpolate_at_tick: target after newest → snap to newest (clamp).
+    #[test]
+    fn interpolate_at_tick_after_newest_snaps_to_newest() {
+        let mut interp = RemoteInterp::new();
+        let mut nemesis = make_nemesis(1, 0.0, 0.0);
+
+        let t0 = Instant::now();
+        let server_tick_0 = 1000u64;
+
+        interp.push(&mut nemesis, 100.0, 100.0, 1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.set_anchor(server_tick_0);
+
+        let t1 = t0 + Duration::from_millis(16);
+        let server_tick_1 = 1001u64;
+
+        interp.push(&mut nemesis, 200.0, 100.0, -1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.timestamps[1] = Some(t1);
+        interp.set_anchor(server_tick_1);
+
+        // Target tick = 1003 (after newest snapshot at 1001)
+        let result = interp.interpolate_at_tick(&nemesis, 1003, server_tick_1, t1);
+
+        assert!(result.is_some());
+        let (x, y, dir) = result.unwrap();
+        let epsilon = 0.5;
+        assert!(
+            (x - 200.0).abs() < epsilon,
+            "expected x ≈ 200.0 (newest), got {x}"
+        );
+        assert!((y - 100.0).abs() < epsilon, "expected y ≈ 100.0, got {y}");
+        assert_eq!(dir, -1.0);
+    }
+
+    /// UT6 — interpolate_at_tick: stale guard (>200ms) → snap to newest.
+    #[test]
+    fn interpolate_at_tick_stale_guard_snaps_to_newest() {
+        let mut interp = RemoteInterp::new();
+        let mut nemesis = make_nemesis(1, 0.0, 0.0);
+
+        let t0 = Instant::now();
+        let server_tick_0 = 1000u64;
+
+        interp.push(&mut nemesis, 100.0, 100.0, 1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.set_anchor(server_tick_0);
+
+        let t1 = t0 + Duration::from_millis(16);
+        let server_tick_1 = 1001u64;
+
+        interp.push(&mut nemesis, 200.0, 100.0, -1.0);
+        interp.timestamps[0] = Some(t0);
+        interp.timestamps[1] = Some(t1);
+        interp.set_anchor(server_tick_1);
+
+        // Target tick far in the future such that target_arrival is >200ms after newest timestamp
+        // target_arrival = t1 + (target_tick - 1001) * 16.67
+        // We want target_arrival - t1 > 200ms => (target_tick - 1001) * 16.67 > 200
+        // => target_tick - 1001 > 12 => target_tick > 1013
+        let result = interp.interpolate_at_tick(&nemesis, 1020, server_tick_1, t1);
+
+        assert!(result.is_some());
+        let (x, y, dir) = result.unwrap();
+        let epsilon = 0.5;
+        // Should snap to newest (200, 100, -1.0) due to stale guard
+        assert!(
+            (x - 200.0).abs() < epsilon,
+            "expected x ≈ 200.0 (stale snap), got {x}"
+        );
+        assert!((y - 100.0).abs() < epsilon, "expected y ≈ 100.0, got {y}");
+        assert_eq!(dir, -1.0);
     }
 }

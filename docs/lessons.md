@@ -355,3 +355,130 @@ Running journal of Rust concepts encountered while building Rustvania.
   are a systemic source of "flaky" assertions. The fix is to compute the
   expected offset analytically (1 frame × VELOCIDAD × dt) and set the
   tolerance just above it, rather than using a magic number.
+
+## Phase 2f (2026-11-25) — Netcode Synchronization & Frame Alignment
+
+### NTP-style clock synchronization with wall-clock time (2026-11-25)
+
+- **Where**: `server/src/world.rs` (`wall_time_ms`), `client/src/network/world.rs` (`handle_packet`).
+- **What it is**: Server broadcasts `server_tick` (monotonic tick counter) and `server_time_ms` (wall-clock `SystemTime::now()`) in every `PlayerPos`. Client computes `clock_offset_ms = server_time_ms - local_time_ms` and `server_tick_offset = server_tick - client_tick`. This enables the client to estimate the current server tick (`client_tick + server_tick_offset`) for interpolation targeting.
+- **Gotcha / insight**: Must use `SystemTime` (wall-clock) on BOTH sides, not `Instant` (monotonic). `Instant` subtraction is meaningless across processes/machines. `SystemTime` allows meaningful `server_time_ms - local_time_ms` arithmetic. Server must run NTP for accuracy; no smoothing/filtering in this phase.
+
+### Tick-based interpolation domain (avoid mixing time domains) (2026-11-25)
+
+- **Where**: `client/src/network/interpolation.rs` (`interpolate_at_tick`), `client/src/world/game.rs` (`draw`).
+- **What it is**: Instead of interpolating based on wall-clock `now` (which mixes `Instant` and `SystemTime` domains), the client computes a `target_tick = server_tick_estimate - INTERPOLATION_DELAY_TICKS` and converts it to an expected arrival `Instant` using the most recent packet's `(server_tick, arrival_time)` as anchor. Finds two snapshots bracketing that arrival time and lerps.
+- **Gotcha / insight**: Never mix `SystemTime` (wall-clock) and `Instant` (monotonic) in arithmetic. They have different epochs and semantics. Tick-based interpolation keeps everything in the monotonic `Instant` domain for interpolation, using server ticks only as a conversion factor (`target_tick - last_known_server_tick`) × tick_duration.
+
+### Ring buffer eviction for N=5 jitter buffer (2026-11-25)
+
+- **Where**: `game/src/entities/nemesis.rs` (`push_interp_snapshot`), `client/src/network/interpolation.rs` (`RemoteInterp::push`).
+- **What it is**: Both structures use a 5-entry ring buffer. On the 6th push, shift entries `[1]→[0]`, `[2]→[1]`, `[3]→[2]`, `[4]→[3]`, new at `[4]`. `interp_len` tracks valid count (0..5). `RemoteInterp::timestamps` mirrors the exact same eviction to stay in sync with `Nemesis::interp_snapshots`.
+- **Gotcha / insight**: The two structures' eviction logic MUST stay perfectly in sync. If `push_interp_snapshot` changes its shift order, `RemoteInterp::push` must be updated identically. This implicit coupling is a maintenance risk; consider a shared buffer struct in future.
+
+### `INTERPOLATION_DELAY_TICKS` vs `INTERPOLATION_DELAY_MS` (2026-11-25)
+
+- **Where**: `game/src/config.rs`, `client/src/network/interpolation.rs`, `client/src/world/game.rs`.
+- **What it is**: Replaced `INTERPOLATION_DELAY_MS` (milliseconds) with `INTERPOLATION_DELAY_TICKS` (server ticks). At 60Hz, 5 ticks = 83ms. The delay is now expressed in the server's tick domain, matching the interpolation target calculation (`target_tick = server_tick_estimate - INTERPOLATION_DELAY_TICKS`).
+- **Gotcha / insight**: Constants should live in the domain where they're used. Milliseconds belong to wall-clock; ticks belong to the simulation timeline. Using ticks avoids conversion errors and makes the headroom calculation explicit (N=5 snapshots = 4 intervals = 67ms span, 5 tick delay = 83ms, ~17ms headroom).
+
+### `STALENESS_THRESHOLD_TICKS` for force-reconcile heuristic (2026-11-25)
+
+- **Where**: `game/src/config.rs`, `client/src/network/world.rs` (`update_network`).
+- **What it is**: If `estimated_server_tick - last_acked_server_tick > STALENESS_THRESHOLD_TICKS` (5), the client detects that server updates have stalled and could trigger force-reconciliation (input re-send, position query). Currently logs the condition; full force-reconcile needs a server position to reconcile against.
+- **Gotcha / insight**: Staleness detection supplements (not replaces) `last_seq` based reconciliation. `last_seq` is input-sequence precise; `server_tick` adds wall-clock context. The threshold must account for normal jitter (5 ticks = 83ms at 60Hz).
+
+### Packet logging with JSONL and `RUSTVANIA_PACKET_LOG` (2026-11-25)
+
+- **Where**: `client/src/network/logging.rs`, `server/src/main.rs`, `client/src/main.rs`.
+- **What it is**: `log_packet(dir, packet)` emits one JSON object per line to stdout when `RUSTVANIA_PACKET_LOG=1` is set. Includes `ts_ms`, `dir` (sent/recv), `type`, `id`, `seq`, `server_tick`, `server_time_ms`, and `key_fields` (abbreviated summary per variant). Zero cost when disabled (early return on env var check).
+- **Gotcha / insight**: JSONL streams are parseable with `jq`, work in CI logs, and don't require external dependencies. The env var gating is essential — PlayerPos at 60Hz per player generates massive output. Server logging is inlined in `main.rs` to avoid a new crate dependency; client uses the shared `logging` module.
+
+### Single binary with `--headless` flag (2026-11-25)
+
+- **Where**: `client/src/main.rs` (`run_headless`, `HeadlessPacketIO`).
+- **What it is**: The same `main.rs` entry point checks `std::env::args().any(|a| a == "--headless")`. If true, runs `run_headless()` with a fixed tick loop (`game_world.update(tick_dt)` + `std::thread::sleep`), no macroquad window init, no `draw()` or `next_frame().await`. Supports `--duration=N` (seconds) and `--server=ADDR` flags.
+- **Gotcha / insight**: `#[macroquad::main]` still creates the async runtime, but we return early before any window calls. Single binary avoids code duplication between GUI and headless modes. For pure in-memory CI testing, the e2e harness uses `LoopbackTransport` (not this headless mode).
+
+### Clock sync reset triggers (Join, Hit, Room Transition, F11) (2026-11-25)
+
+- **Where**: `client/src/network/world.rs` (JoinResponse, Hit), `client/src/world/lib.rs` (`load_current_level`), `client/src/world/game.rs` (`update` F11).
+- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `Hit` for own player (death/respawn teleport), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset).
+- **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. `Hit` handling is now in both `handle_packet` (server-broadcast death) AND `handle_death` (client-initiated death) — keep both in sync.
+
+### Phase 2f: Netcode Synchronization & Frame Alignment (2026-11-25)
+
+#### SystemTime vs Instant — never mix wall-clock and monotonic
+- **Where**: `server/src/world.rs` (`wall_time_ms`), `client/src/network/world.rs` (`handle_packet` clock sync), `client/src/network/interpolation.rs` (`interpolate_at_tick`).
+- **What it is**: `SystemTime` is wall-clock (can jump via NTP/leap seconds), `Instant` is monotonic (never goes backward, only measures duration since arbitrary epoch). Clock sync uses `SystemTime` on both sides (NTP-style offset). Interpolation uses `Instant` for arrival timestamps and converts target ticks to expected arrival using `last_known_arrival` as anchor.
+- **Gotcha / insight**: The original prototype sent server `Instant`-based uptime as `server_time_ms` but client used `SystemTime::now()` — subtracting them is meaningless (different epochs). Fix: server must send `SystemTime` wall-clock. Also, `interpolate_at_tick` converts server ticks to monotonic `Instant` using the anchor (`last_known_arrival`), never mixing domains.
+
+#### Ring buffer eviction — keep latest N, shift on (N+1)th push
+- **Where**: `game/src/entities/nemesis.rs` (`push_interp_snapshot`), `client/src/network/interpolation.rs` (`RemoteInterp::push`).
+- **What it is**: 5-entry ring buffer. On 6th push: shift `[1]→[0]`, `[2]→[1]`, `[3]→[2]`, `[4]→[3]`, new at `[4]`. `RemoteInterp.timestamps` mirrors this exactly. Both use `interp_len` to track valid count (0..5).
+- **Gotcha / insight**: Eviction order must be identical in both structures. If `Nemesis` shifts 4 entries but `RemoteInterp` shifts 3, timestamps desync and interpolation produces garbage. Test `interpolate_evicts_old_snapshots` verifies this.
+
+#### Tick-based interpolation — convert server ticks to Instant using anchor
+- **Where**: `client/src/network/interpolation.rs` (`interpolate_at_tick`).
+- **What it is**: Target render tick = `server_tick_estimate - INTERPOLATION_DELAY_TICKS`. Convert to expected arrival: `target_arrival = last_known_arrival + (target_tick - last_known_server_tick) * TICK_MS`. Find two snapshots whose arrival times bracket `target_arrival`, lerp position, snap direction to newer.
+- **Gotcha / insight**: This avoids `SystemTime` entirely for interpolation. The server tick is the authoritative timeline; client renders at a fixed delay behind it. Stale guard uses `target_arrival` vs newest timestamp (not wall-clock `now`).
+
+#### Feature-gated binaries — headless without macroquad window
+- **Where**: `client/Cargo.toml` (`[[bin]]` with `required-features`), `client/src/main.rs` (GUI), `client/src/main_headless.rs` (headless).
+- **What it is**: Two binaries: `metroidvania-rust` (requires `gui` feature, uses `#[macroquad::main]`), `rustvania-headless` (requires `headless` feature, plain `fn main()`). CI runs `cargo run --bin rustvania-headless --features headless`.
+- **Gotcha / insight**: `#[macroquad::main]` creates the window BEFORE calling your async function — you cannot check a flag and skip window creation. Separate binaries with feature gates are the clean solution.
+
+#### Staleness threshold constant — STALENESS_THRESHOLD_TICKS in game::config
+- **Where**: `game/src/config.rs` (`STALENESS_THRESHOLD_TICKS = 5`), `client/src/network/world.rs` (staleness check).
+- **What it is**: If `server_tick_estimate - last_acked_server_tick > STALENESS_THRESHOLD_TICKS`, network may be stalled. Force reconciliation or log warning.
+- **Gotcha / insight**: `server_tick_estimate` is `client_tick + server_tick_offset` (both can be negative early on). Use `saturating_sub` and check `> 0` before comparing to threshold.
+
+## Phase 2g (2026-11-25) — Fixed Timestep & Accumulator Pattern
+
+### Accumulator pattern (fixed timestep) — `get_time()` vs `get_frame_time()` (2026-11-25)
+
+- **Where**: `client/src/main.rs` (GUI loop).
+- **What it is**: Each render frame, accumulate the real elapsed `frame_dt = get_time() - last_time`, clamp it to `MAX_ACCUMULATED_FRAMES * tick_dt` (spiral-of-death protection), then run 0..=5 fixed `update(TICK_DT)` steps and render with `alpha = accumulator / tick_dt`. Simulation runs at a fixed 60Hz regardless of render rate; only the *render* is interpolated.
+- **Gotcha / insight**: `get_time()` returns `f64` (seconds since start), while the old `get_frame_time()` returns `f32` (the last frame's delta). Mixing them in the same `accumulator += frame_dt` expression is a type error — keep the accumulator in `f64` and cast to `f32` only at the `update(tick_dt as f32)` / `draw(alpha as f32)` boundary. The clamp is a *safety* bound (prevents runaway catch-up), not a render-floor guarantee.
+
+### `std::hint::spin_loop()` — hybrid sleep + busy-wait (2026-11-25)
+
+- **Where**: `client/src/main.rs` (`run_headless`).
+- **What it is**: To hit true 60Hz without drift, the loop advances `next_tick += tick_interval` (a monotonic `Instant`), sleeps for `remaining - HEADLESS_BUSY_WAIT_MS` (most of the interval), then busy-waits the last ~1ms with `while Instant::now() < next_tick { std::hint::spin_loop() }`. `spin_loop` is a hint to the CPU (like `PAUSE`) that keeps the thread alive without a full context switch, giving sub-millisecond precision.
+- **Gotcha / insight**: `std::thread::sleep` has ~1ms precision on Linux and ~15ms on Windows, so a plain `sleep(16)` drifts (~62.5Hz). Sleeping for the bulk and busy-waiting only the final ~1ms costs ~6% CPU at 60Hz — the owner-approved tradeoff. Advance `next_tick += interval` (not `next_tick = now + interval`) to avoid accumulating drift.
+
+### `glam::Vec2::lerp` for render interpolation (2026-11-25)
+
+- **Where**: `client/src/world/game.rs` (`interpolated_player_pos`).
+- **What it is**: `self.prev_player_pos.lerp(self.player.pos, a)` returns `prev + (curr - prev) * a`, the standard linear interpolation. Combined with `alpha.clamp(0.0, 1.0)` it interpolates the local player between the previous and current sim-tick positions for smooth motion.
+- **Gotcha / insight**: `Vec2` is `Copy`, so `player.pos` can be copied into a local before `player` is moved into the struct literal. For the *direction* (`interpolated_player_dir`), simple linear lerp misbehaves across the -π/π boundary; it's accepted here because per-tick angle changes are small (documented in the plan's Box 4 Watch out).
+
+### Decoupling input sampling from simulation (dependency injection for testability) (2026-11-25)
+
+- **Where**: `client/src/world/game.rs` (`World::update`), `client/src/main.rs` (GUI loop).
+- **What it is**: `World::update` stopped calling `is_key_pressed`/`is_key_down` and instead reads injected `move_left`/`move_right`/`pressed_jump`/`pressed_shoot` fields. The GUI loop samples the keyboard once per render frame and writes those fields before calling `update`. The simulation crate therefore has no macroquad *input* dependency and can run headlessly under `#[cfg(test)]` and in the e2e harness.
+- **Gotcha / insight**: macroquad *input* functions (`is_key_pressed`, `is_key_down`) panic when no window exists, but `macroquad::rand::gen_range` is context-free (it's a thread-local PRNG, `quad_rand`). So only the input calls had to move out — the enemy RNG call could stay. This is the same idea as Phase 2a's `PlayerInput`, taken one step further: even *sampling* the input is now outside the simulation.
+
+### Decoupling the camera from screen dimensions (a second macroquad dependency) (2026-11-25)
+
+- **Where**: `client/src/camera.rs` (`GameCamera`), `client/src/world/game.rs` (`World::update`), `client/src/main.rs`.
+- **What it is**: `GameCamera::update` originally called `screen_width()`/`screen_height()`, which — like the input functions — panic outside a macroquad window (`get_context` → `assert!(THREAD_ID.is_some())`). This was a *second* macroquad-context dependency that Box 2a's input-decoupling description did not call out, and it broke every unit/e2e test that ran `World::update` headlessly. The fix: `GameCamera` stores injected `view_width`/`view_height` fields (default 1280×720), updated each frame in the GUI loop via `set_viewport(screen_width(), screen_height())`.
+- **Gotcha / insight**: `screen_width`/`screen_height` are *context* queries, not *input* — grepping for `is_key_pressed`/`is_key_down` missed them. When decoupling a simulation from a windowing library, audit for **all** context-requiring calls (`screen_width`, `get_time`, `get_frame_time`, `get_mouse_position`, …), not just input.
+
+### Edition 2024 / toolchain gotchas surfaced by the RED tests (2026-11-25)
+
+- **Where**: `e2e/tests/packet_log_rate.rs`.
+- **What it is**: Two changes tripped up tests that were written but never executed (the tester's shell was denied): (1) `std::env::set_var`/`remove_var` are `unsafe` in edition 2024 (concurrent reads of the same var while another thread calls `set_var` are UB); (2) `clippy::collapsible_if` fires on a nested `if { if let Some(..) { .. } }`, which collapses into a *let-chain*: `if cond && let Some(x) = expr { .. }`.
+- **Gotcha / insight**: these have *different* gates — `unsafe set_var` is edition-2024-gated, while let-chains (`&& let`) were stabilized in **Rust 1.88** (a compiler-version event, not an edition). The best fix for a per-subprocess env var is `Command::env(...)` on the child (scopes the var, no `unsafe`), not a process-wide `set_var` — the latter leaks the flag into *every* spawned child. A RED test that was never compiled/run can hide all of this — the subagent shell-denial meant the orchestrator had to be the first to actually execute them.
+
+### Shared helper in the core crate — one impl for binary + integration test (2026-11-25)
+
+- **Where**: `game/src/fixed_timestep.rs` (new), `client/src/main.rs`, `e2e/tests/gui_accumulator.rs`.
+- **What it is**: QA m2 asked to kill a copy-paste of the accumulator loop. The fix is to put the stateful `accumulate → clamp → step → alpha` logic in a small `pub struct FixedTimestep` in the `game` crate (already the pure-logic core shared by server, client, and e2e), re-export it from `game/src/lib.rs`, and have **both** the production GUI loop and the e2e integration test call `advance(frame_dt)` / `alpha()` instead of re-implementing the loop.
+- **Gotcha / insight**: This only works because the crate is a *library* (`game` has `src/lib.rs`), so `pub` items are reachable from the binary (`client`) and the integration-test crate (`e2e`) alike. If the helper had been a `#[cfg(test)]` unit, the e2e crate (a separate compilation) could not see it. `advance` returns a *step count* rather than calling `World::update` itself — keeping the helper free of any game-world dependency is what lets it stay in the pure `game` crate.
+
+### Decoupling two invariants to make a dead guard testable (2026-11-25)
+
+- **Where**: `game/src/fixed_timestep.rs` (`new` vs `with_max_accumulator`), the `advance_max_frames_guard_caps_steps` test.
+- **What it is**: The spiral-of-death guard `while accumulator >= tick_dt && steps < max_frames` was dead in production because `new` ties `max_accumulator = max_frames * tick_dt`, so the clamp already bounds the accumulator to `max_frames` ticks and the guard can never be the binding constraint. To test the guard *at all*, you must break the coupling: a second constructor (`with_max_accumulator`) lets a test set `max_accumulator` much larger than `max_frames * tick_dt`, so a 1s frame against a 10s cap would drain ~60 ticks without the guard — and `assert_eq!(advance(1.0), 2)` only passes because the guard caps it.
+- **Gotcha / insight**: A guard that is *redundant* under the normal constructor is invisible to tests that only use `new`. The general pattern: when a defensive branch is provably unreachable through the public happy path, add a narrow, clearly-documented seam (an alternate constructor or a `#[cfg(test)]` field setter) that re-creates the edge case, then assert the branch. Otherwise the guard rots silently — exactly QA m2's complaint.

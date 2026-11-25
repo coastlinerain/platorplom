@@ -16,6 +16,11 @@ pub struct GameCamera {
     pub cam: Camera2D,
     pub smoothing: f32,
     pub current_target: Vec2,
+    /// Viewport size in pixels, injected from the render loop via
+    /// `set_viewport` so the camera has no macroquad window dependency
+    /// (testable headlessly, matching the input decoupling in Box 2a).
+    pub view_width: f32,
+    pub view_height: f32,
 }
 
 impl GameCamera {
@@ -24,12 +29,22 @@ impl GameCamera {
             cam: Camera2D::default(),
             smoothing: 0.15,
             current_target: vec2(0.0, 0.0),
+            view_width: 1280.0,
+            view_height: 720.0,
         }
     }
 
+    /// Update the viewport dimensions the camera uses for centering and zoom.
+    /// Called once per render frame by the GUI loop (which has a window); the
+    /// camera itself never queries `screen_width`/`screen_height`.
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.view_width = width;
+        self.view_height = height;
+    }
+
     pub fn update(&mut self, player_pos: Vec2, player_size: Vec2, level: &Level) {
-        let view_width = screen_width() / 2.0;
-        let view_height = screen_height() / 2.0;
+        let view_width = self.view_width / 2.0;
+        let view_height = self.view_height / 2.0;
 
         let target_x = player_pos.x + player_size.x / 2.0;
         let target_y = player_pos.y + player_size.y / 2.0;

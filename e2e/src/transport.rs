@@ -67,6 +67,8 @@ mod tests {
             level_x: 3,
             level_y: 7,
             last_seq: 999,
+            server_tick: 12345,
+            server_time_ms: 67890,
         };
 
         client_tr.send(packet);
@@ -81,6 +83,8 @@ mod tests {
                 level_x,
                 level_y,
                 last_seq,
+                server_tick,
+                server_time_ms,
             }) => {
                 assert_eq!(id, 42);
                 assert!((x - 123.45).abs() < 0.001);
@@ -89,6 +93,8 @@ mod tests {
                 assert_eq!(level_x, 3);
                 assert_eq!(level_y, 7);
                 assert_eq!(last_seq, 999);
+                assert_eq!(server_tick, 12345);
+                assert_eq!(server_time_ms, 67890);
             }
             other => panic!("expected PlayerPos, got {:?}", other),
         }

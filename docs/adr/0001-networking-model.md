@@ -17,7 +17,7 @@ cheat-prone and would become tech debt for PvP.
 
 - The client sends **inputs** (not positions); the server simulates movement and
   collision at a fixed tick and broadcasts authoritative state back.
-- **Fixed tick rate**: 20 Hz, expressed as a named constant (`TICK_HZ`), so a later
+- **Fixed tick rate**: 60 Hz, expressed as a named constant (`TICK_HZ`), so a later
   move to 30/60 Hz is a one-line change — no hardcoded `20.0` scattered in the code.
 - **Channels**: reliable-ordered for join/leave/actions/hit (state-changing),
   unreliable for position broadcasts (latest-wins).
@@ -29,10 +29,17 @@ cheat-prone and would become tech debt for PvP.
 1. **2a — Extract a shared `game` core crate**: move level/physics/collision/
    entities into a library both server and client depend on. (Prerequisite: the
    server cannot simulate without the same simulation code the client uses.)
-2. **2b — Server-authoritative movement**: server tick loop (20 Hz) applies
+2. **2b — Server-authoritative movement**: server tick loop (60 Hz) applies
    inputs → positions → broadcasts; client sends inputs only.
 3. **2c — Client prediction + reconciliation**: client predicts its own movement
    locally and reconciles when authoritative state arrives.
+4. **2d — E2E testing infrastructure**: deterministic in-memory loopback transport
+   for multi-client integration tests.
+5. **2e — Server-authoritative hit detection & bullet spawn**: server validates
+   hits, tracks enemy death state, broadcasts authoritative bullet spawn.
+6. **2f — Netcode synchronization & frame alignment**: server broadcasts tick
+   and timestamp; client implements clock sync, jitter buffer, and frame
+   interpolation for smooth remote entity rendering.
 
 ## Consequences
 

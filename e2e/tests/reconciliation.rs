@@ -76,6 +76,8 @@ fn e3_stale_playerpos_ignored() {
         level_x: 0,
         level_y: 0,
         last_seq: 50,
+        server_tick: 100,
+        server_time_ms: 1000,
     };
     let bytes = postcard::to_allocvec(&stale).expect("serialize");
     let _ = h.to_clients[0].send(bytes);

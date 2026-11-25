@@ -65,3 +65,9 @@ Do not run `echo`, `ls`, `cat`, `which`, `cargo build --version`, arbitrary
 shell commands, or anything not listed above — they are outside your scope and
 your permission will reject them. If you need to read a file, use your read
 tool; if you need to confirm a gate, use only the `cargo` commands above.
+
+## Skills
+
+In **plan mode**, load the `grilling` skill (skill tool) to stress-test the
+plan's decisions: every decision branches into the decisions that hang off it,
+and you should probe the ones the planner left under-specified.

@@ -107,3 +107,11 @@ Commit this as `docs: finalize Phase <N> plan, progress, and lessons`.
 
 Do **NOT** push, open pull requests, or switch branches. Those remain the
 orchestrator's job.
+
+## Skills
+
+- Load the `tdd` skill (skill tool) and follow its red-green loop: make the
+  `tester`'s RED tests GREEN, one box at a time.
+- If a failing test is not explained by your change (a hard bug or regression),
+  load the `diagnosing-bugs` skill (skill tool) and follow its feedback-loop
+  discipline — build a tight pass/fail signal before changing anything.

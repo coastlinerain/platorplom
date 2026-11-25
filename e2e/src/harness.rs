@@ -32,6 +32,15 @@ impl VirtualClock {
         self.anchor + Duration::from_micros(self.us)
     }
 
+    pub fn now_ms(&self) -> u64 {
+        self.us / 1000
+    }
+
+    pub fn ticks(&self) -> u64 {
+        // Assuming 60Hz: 1 tick = 1/60 sec = ~16667 microseconds
+        self.us / 16667
+    }
+
     pub fn advance(&mut self, ms: u64) {
         self.us += ms * 1000;
     }
@@ -256,6 +265,8 @@ impl TestHarness {
                     level_x: lx,
                     level_y: ly,
                     last_seq,
+                    server_tick: self.clock.ticks(),
+                    server_time_ms: self.clock.now_ms(),
                 };
                 let bytes = postcard::to_allocvec(&packet).expect("serialize PlayerPos");
                 let _ = tx.send(bytes);
