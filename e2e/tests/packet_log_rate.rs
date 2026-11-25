@@ -23,13 +23,9 @@ fn extract_ts_ms(line: &str) -> Option<u64> {
 
 #[test]
 fn packet_log_playerinput_rate() {
-    // SAFETY: `set_var` is `unsafe` in Rust 2024 (a concurrent read of the same
-    // env var while another thread calls `set_var` is UB). This test is the only
-    // writer in a single-threaded subprocess spawn; no other thread touches it.
-    unsafe { std::env::set_var("RUSTVANIA_PACKET_LOG", "1") };
-
     // A server is required so the client receives a JoinResponse and gets an id;
-    // `update_network` only sends PlayerInput once an id is assigned.
+    // `update_network` only sends PlayerInput once an id is assigned. The server
+    // is NOT given RUSTVANIA_PACKET_LOG — only the client logs, so CI stays quiet.
     let mut server = Command::new("cargo")
         .args(["run", "-p", "metroidvania-server"])
         .spawn()
@@ -47,6 +43,9 @@ fn packet_log_playerinput_rate() {
             &format!("--duration={}", duration_secs),
             "--server=127.0.0.1:12345",
         ])
+        // Scope the log flag to the client child only (avoids a process-wide
+        // `unsafe { set_var }` and keeps the spawned server from flooding CI).
+        .env("RUSTVANIA_PACKET_LOG", "1")
         .output()
         .expect("failed to run headless client");
 
