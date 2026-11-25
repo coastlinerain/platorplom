@@ -1,6 +1,7 @@
 ---
 description: Explains code and decisions without changing files (learning aid)
 mode: subagent
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"

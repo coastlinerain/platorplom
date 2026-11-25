@@ -1,6 +1,7 @@
 ---
 description: Writes automated tests for pure logic and runs them
 mode: subagent
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"
@@ -69,3 +70,9 @@ Include the standard `## Explain` block.
 Do **NOT** push or switch branches — those remain the orchestrator's job. End
 every report with handoff items for any destructive filesystem operations plus
 unresolved questions.
+
+## Skills
+
+Load the `tdd` skill (skill tool) before writing tests and follow its guidance on
+good tests, seams, and the red-green loop. You write the RED tests first; the
+implementer makes them GREEN.
