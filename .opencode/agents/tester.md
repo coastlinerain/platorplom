@@ -39,6 +39,21 @@ permissions:
   - action: shell
     resource: "git reset *"
     effect: deny
+  - action: shell
+    resource: "git rebase *"
+    effect: deny
+  - action: shell
+    resource: "git cherry-pick *"
+    effect: deny
+  - action: shell
+    resource: "git revert *"
+    effect: deny
+  - action: shell
+    resource: "git tag *"
+    effect: deny
+  - action: shell
+    resource: "git clean *"
+    effect: deny
 ---
 
 You write automated tests for the project and run them. Follow the conventions in

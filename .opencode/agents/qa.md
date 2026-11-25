@@ -50,6 +50,21 @@ permissions:
   - action: shell
     resource: "git reset *"
     effect: deny
+  - action: shell
+    resource: "git rebase *"
+    effect: deny
+  - action: shell
+    resource: "git cherry-pick *"
+    effect: deny
+  - action: shell
+    resource: "git revert *"
+    effect: deny
+  - action: shell
+    resource: "git tag *"
+    effect: deny
+  - action: shell
+    resource: "git clean *"
+    effect: deny
 ---
 
 You are the QA auditor for the Rustvania project. You review work from two angles

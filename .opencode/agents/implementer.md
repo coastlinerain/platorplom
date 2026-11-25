@@ -38,6 +38,21 @@ permissions:
   - action: shell
     resource: "git reset *"
     effect: deny
+  - action: shell
+    resource: "git rebase *"
+    effect: deny
+  - action: shell
+    resource: "git cherry-pick *"
+    effect: deny
+  - action: shell
+    resource: "git revert *"
+    effect: deny
+  - action: shell
+    resource: "git tag *"
+    effect: deny
+  - action: shell
+    resource: "git clean *"
+    effect: deny
 ---
 
 You implement a feature from its plan. Read `docs/plans/<feature>.md` (and its
