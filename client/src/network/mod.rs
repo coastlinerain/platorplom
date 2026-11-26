@@ -3,6 +3,7 @@ pub mod interpolation;
 pub mod logging;
 pub mod packet_io;
 pub mod prediction;
+pub mod transport;
 pub mod world;
 
 // RED tests for the handshake helper (spec AC6, plan Box 2).

@@ -526,3 +526,29 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `client/src/app.rs` (`update_connecting`).
 - **What it is**: `poll_join_response` takes `&mut dyn PacketIO`, but `match &mut self.io { Some(io) => ... }` binds `io: &mut Box<dyn PacketIO>`. `Box<dyn PacketIO>` does **not** implement `PacketIO` itself, so passing `io` directly fails to compile (`the trait PacketIO is not implemented for Box<dyn PacketIO>`). The fix is the explicit `io.as_mut()` (or `&mut **io`) to reach the `dyn PacketIO` inside the `Box`.
 - **Gotcha / insight**: Auto-deref applies to method *receivers* (`io.method()`) but not to *argument* position — a `&mut Box<dyn T>` passed to a `&mut dyn T` parameter needs an explicit `.as_mut()`/reborrow. The orchestrator caught this one by compiling code the shell-denied implementer could not; it is exactly the kind of error a working RED/GREEN loop is meant to surface early.
+
+## Refactor: windowless headless binary (2026-11-25)
+
+### Cargo feature-gated binaries with `required-features` (2026-11-25)
+
+- **Where**: `client/Cargo.toml` (`[features]`, two `[[bin]]` entries), `client/src/main_headless.rs`.
+- **What it is**: `[features] gui = [] / headless = [] / default = ["gui"]` are *pure markers* — they gate no dependency and no lib item, they only feed each `[[bin]]`'s `required-features`. Two explicit `[[bin]]` entries (`metroidvania-rust` → `src/main.rs`, `rustvania-headless` → `src/main_headless.rs`) replace Cargo's implicit auto-detection of `src/main.rs`.
+- **Gotcha / insight**: with two bins and no `default-run`, a bare `cargo run` now fails with "could not determine which binary to run" — you must pass `--bin`. Also, `cargo clippy --all-targets` (default features) silently *skips* the `headless`-gated binary, so the CI lint step needs `--all-features` to lint both.
+
+### Plain `fn main()` as an alternative entry point — why headless can't be a flag (2026-11-25)
+
+- **Where**: `client/src/main_headless.rs` vs `client/src/main.rs`.
+- **What it is**: `#[macroquad::main]` is a proc-macro that *wraps* your function in the macroquad event loop and **opens the window before your code runs** — so a `--headless` flag checked *inside* `main()` is too late: the window already exists. The fix is a separate binary whose entry point is an ordinary synchronous `fn main()` with no `#[macroquad::main]`, no `macroquad` import, and no `async`.
+- **Gotcha / insight**: the macroquad *entry point* and the macroquad *API* are separable. The lib still depends on macroquad unconditionally and the headless binary links it (linking alone opens no window); what matters is never *initializing* it — i.e. never calling `app.draw()`, `clear_background`, `next_frame`, `screen_width`, or `screen_height`.
+
+### Module privacy + `pub use` re-export for shared transport (2026-11-25)
+
+- **Where**: `client/src/network/transport.rs`, `client/src/network/mod.rs`, `client/src/lib.rs`.
+- **What it is**: Moving the transport out of `main.rs` into the lib means the code is now *inside* the crate, so the external path `metroidvania_rust::network::logging::log_packet` becomes the crate-relative `crate::network::logging::log_packet`. The two `PacketIO` structs stay module-private; only `pub fn make_transport_factory` is exposed, and `lib.rs` re-exports it with `pub use network::transport::make_transport_factory;` so both binaries import the same symbol.
+- **Gotcha / insight**: a `use` line and a fully-qualified call path are mutually exclusive — if you both `use crate::network::logging::log_packet;` *and* call `crate::network::logging::log_packet(...)`, the import is unused and `clippy::unused_imports` (under `-D warnings`) fails the build. Pick one (import the short name and call `log_packet(...)`), or drop the import and keep the full path.
+
+### Import hygiene after trimming a binary (2026-11-25)
+
+- **Where**: `client/src/main.rs`.
+- **What it is**: After removing the `--headless` branch, `main.rs` no longer *names* `TransportFactory` (it only writes `let factory = make_transport_factory(...)` and `App::new(factory, ...)`), nor `PacketIO`, `game::config::*`, or `Duration`. Keeping those imports is a `clippy::unused_imports` error under `-D warnings`, so they must be deleted alongside the code they served.
+- **Gotcha / insight**: a re-exported function (`make_transport_factory`) is used by its *call*, so the import stays; a *type* like `TransportFactory` is only "used" if you write its name in a signature or annotation. Type inference through `let factory = ...` means the type never appears in the source, so importing it is always a lint failure.

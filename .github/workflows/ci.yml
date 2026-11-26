@@ -20,13 +20,7 @@ jobs:
         run: cargo fmt --check --all
 
       - name: Lint with Clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
-
-      - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
 
       - name: Run tests
-        # The "headless" client binary still opens a macroquad window (it is the
-        # GUI binary behind a `--headless` flag), so the subprocess tests that
-        # spawn it (headless_timing, packet_log_rate) need a virtual display.
-        run: xvfb-run -a cargo test --workspace
+        run: cargo test --workspace
