@@ -72,9 +72,10 @@ struct ShootRequest {
 ```
 
 ```rust
-// server/src/lib.rs — re-export change
-// BEFORE: pub use world::{BulletSpawnInfo, EnemyDiedInfo, EnemyState};
-pub use world::{BulletSpawnInfo, ServerWorld};   // EnemyDiedInfo / EnemyState dropped
+// server/src/lib.rs — re-export change (edit line 3 only)
+// line 2 `pub use world::ServerWorld;` is ALREADY present and stays untouched.
+// BEFORE (line 3): pub use world::{BulletSpawnInfo, EnemyDiedInfo, EnemyState};
+pub use world::BulletSpawnInfo;   // drop EnemyDiedInfo / EnemyState; do NOT re-add ServerWorld
 ```
 
 ```rust
@@ -182,14 +183,19 @@ Deleted public/type items (must not remain anywhere):
       - Their assertions (shot count, owner, dir) are unchanged.
 
   - `server/src/lib.rs`
-    - `pub use world::{BulletSpawnInfo, EnemyDiedInfo, EnemyState};` →
-      `pub use world::{BulletSpawnInfo, ServerWorld};`.
+    - Line 3 `pub use world::{BulletSpawnInfo, EnemyDiedInfo, EnemyState};` →
+      `pub use world::BulletSpawnInfo;` — drop only `EnemyDiedInfo` /
+      `EnemyState`. Line 2 (`pub use world::ServerWorld;`) is already present
+      and stays **untouched** — do **not** re-add `ServerWorld` to line 3 (that
+      would duplicate the line-2 re-export and trip E0252).
 
   - `server/src/main.rs`
     - Remove the `GamePacket::EnemyDied`, `GamePacket::EnemyStateRequest`,
-      `GamePacket::EnemyStateResponse` arms from `packet_type_name`,
-      `packet_id`, and `packet_key_fields` (the `_ => None` / catch-all arms
-      already cover the removed variants).
+      `GamePacket::EnemyStateResponse` arms from `packet_type_name` and
+      `packet_key_fields` (the catch-alls already cover the removed variants).
+    - In `packet_id`, remove **only** the `GamePacket::EnemyDied` arm (lines
+      57–61) — `EnemyStateRequest`/`EnemyStateResponse` have no arm there and
+      fall through `_ => None`.
     - Remove the `GamePacket::EnemyStateRequest { room_x, room_y }` handling arm
       in the event loop (lines 265–277, incl. its `get_enemy_state` call and
       `EnemyStateResponse` reply).
@@ -235,15 +241,17 @@ Deleted public/type items (must not remain anywhere):
       reference (line 8).
     - In `check_player_death`: rename the `world.enemy_bullets` loop variable
       target (line 20) — PvP collision stays.
-    - In `load_current_level`: remove `world.enemies.clear();` (line 61) and the
+    - In `load_current_level`: remove `world.enemies.clear();` (line 61), remove
+      `world.pending_enemy_deaths.clear();` (line 66), and remove the
       `EnemyStateRequest` send block (lines 78–89: `let (rx, ry)` + `req`
       construction + `world.network.send(req)` + the "Level load requested"
       `println!`). Keep the other clears (bullets, clock reset, sticky reset).
     - In `handle_death`: remove `world.pending_enemy_deaths.clear();` (line 49),
       keep the other clears.
     - Rename `world.enemy_bullets.clear()` → `world.remote_bullets.clear()`
-      (in both `load_current_level` line 63 and `handle_death` — see rename
-      sub-list).
+      (in `load_current_level`, line 63 — the only such site; `handle_death`
+      has no `enemy_bullets.clear()` of its own, it calls `load_current_level`).
+      See the rename sub-list.
 
   - `client/src/network/world.rs`
     - In the `BulletSpawn` handler, rename `world.enemy_bullets.push(...)` →
@@ -267,8 +275,11 @@ Deleted public/type items (must not remain anywhere):
 
   - `client/src/network/logging.rs`
     - Remove the `GamePacket::EnemyDied`, `EnemyStateRequest`,
-      `EnemyStateResponse` arms from `packet_type_name`, `packet_id`, and
+      `EnemyStateResponse` arms from `packet_type_name` and
       `packet_key_fields`.
+    - In `packet_id`, remove **only** the `GamePacket::EnemyDied` arm (line 53) —
+      `EnemyStateRequest`/`EnemyStateResponse` have no arm there and fall
+      through `_ => None`.
     - Remove the `#[cfg(test)]` assertions in `packet_type_name_all_variants`,
       `packet_id_all_variants`, and `packet_key_fields_all_variants` that
       construct those three variants; leave the rest of each test intact.
@@ -325,7 +336,7 @@ Deleted public/type items (must not remain anywhere):
   | `client/src/world/lib.rs` | `pub fn update_enemy_bullets_position` (line 4) → `update_remote_bullets_position` |
   | `client/src/world/lib.rs` | `world.enemy_bullets.retain_mut(...)` (line 8) → `world.remote_bullets` |
   | `client/src/world/lib.rs` | `for bullet in &mut world.enemy_bullets` (line 20) → `&mut world.remote_bullets` |
-  | `client/src/world/lib.rs` | `world.enemy_bullets.clear()` in `handle_death` (line 63) → `world.remote_bullets.clear()` |
+  | `client/src/world/lib.rs` | `world.enemy_bullets.clear()` in `load_current_level` (line 63) → `world.remote_bullets.clear()` |
   | `client/src/network/world.rs` | `world.enemy_bullets.push(...)` (line 264–266) → `world.remote_bullets.push(...)` |
   | `e2e/src/harness.rs` | `for bullet in &mut client.world.enemy_bullets` (line 349) → `remote_bullets` |
   | `e2e/src/harness.rs` | `client.world.enemy_bullets.retain(...)` (line 364) → `remote_bullets` |
@@ -363,8 +374,13 @@ Deleted public/type items (must not remain anywhere):
      condition.
   2. `cargo fmt --check --all` — clean.
   3. `cargo clippy --all-targets --all-features --workspace -- -D warnings` —
-     clean (watch for now-unused imports: `Enemy`, `HashSet`,
-     `macroquad::rand::gen_range`).
+     clean (watch for now-unused imports: `Enemy` and
+     `macroquad::rand::gen_range` in `client/src/world/game.rs`;
+     `game::config::TILE_SIZE` and `game::types::EntityType` in
+     `server/src/world.rs`, both used only by the deleted
+     `build_enemies_for_room`). Do **not** expect `HashMap`, `Map`, or `HashSet`
+     to be unused — `HashMap`/`Map` stay used in `server/src/world.rs`, and
+     `HashSet` stays used by `spawned_bullet_ids` in `client/src/world/game.rs`.
   4. Grep-clean (case-sensitive), over `server/ client/ protocol/ game/src/entities/`:
 
      ```bash
