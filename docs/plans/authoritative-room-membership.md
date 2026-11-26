@@ -825,7 +825,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 6 — client network: response handler, own-`PlayerPos` adoption, drop `coords_match`
 
-- [ ] done
+- [x] done
 - **Files**: `client/src/network/world.rs`; `client/src/network/prediction.rs`.
 - **Change**:
   - Own-`PlayerPos` branch: after the clock-sync block, compute
@@ -852,14 +852,37 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   `grep -RIn 'coords_match' client/` → nothing.
 - **Test**: C8–C11.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: `if` guards inside match arms, `game::is_newer_seq`
-    as an ordering gate, idempotent state application, borrow-splitting between
-    `world` fields while handling a packet, tuple comparison of `(u8,u8)`)_
-  - Watch out: _(a stale pre-transition `PlayerPos` must not drag the client back;
-    adoption itself must not re-arm a retry; the reject path clears the buffer so
-    the snap-back is not replayed away)_
+  - What: `handle_packet` gained a `RoomChangeResponse` arm (accepted →
+    `apply_room_change_local`; rejected → optional defensive adoption, snap
+    position/velocity/interpolation, clear the input buffer, clear pending, set
+    `ROOM_CHANGE_RETRY_TICKS`); the own-`PlayerPos` branch now adopts a new
+    authoritative room when the packet is not stale, and the `coords_match`
+    gate is gone; explicit ignore arms were added for inbound
+    `RequestRoomChange`; the prediction/prediction-test docs were reworded;
+    C8–C11 were added to the existing `mod tests`.
+  - Why: the reliable ack and the unreliable `PlayerPos` can arrive in either
+    order. Applying either to the same authoritative state (and ignoring stale
+    packets) makes the room converge without a "which stream won" hack.
+    Removing `coords_match` is safe precisely because the server now teleports
+    on acceptance, so a cross-room `PlayerPos` is authoritative rather than a
+    lagging leftover.
+  - Rust concepts: `if` as a statement inside a match arm (not a guard) keeps
+    the accepted/rejected handling in one place; `game::is_newer_seq` is the
+    wrapping-aware ordering gate; applying the same `Copy` payload twice is
+    modelled as an idempotent state transformation; tuple comparison
+    `(u8, u8) != world.current_room()` compares rooms without per-axis `&&`;
+    `world.current_room()` borrows `&World` only for the comparison, so the
+    later `&mut World` adoption call is accepted by the borrow checker; the
+    reject branch deliberately sets `room_change_retry` after the adoption call
+    because `apply_room_change_local` resets it to 0 (a real ordering
+    dependency, not incidental).
+  - Watch out: a stale pre-transition `PlayerPos` must not drag the client back
+    — that is why adoption is gated on `!stale`; the bounds guard stays so a
+    bogus `(99,99)` cannot index-panic; `not_in_wall` stays as defense in depth;
+    the reject path clears the buffer **after** the snap so replay cannot undo
+    it; a defensive adoption must not re-arm the retry (set retry afterwards);
+    this is the only place that calls `apply_room_change_local` for
+    `PlayerPos`, so `request_room_change` still never mutates the room.
 
 ### Box 7 — e2e harness + new suite + choreography
 
