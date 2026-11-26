@@ -332,9 +332,10 @@ Notes:
 - Step 4: `let (shots, deaths) = self.server.update(tick_dt);`.
 - Track hits: `pub last_deaths: Vec<PlayerHitInfo>` (cleared at the start of each
   `tick` and filled from `deaths`).
-- Step 6b: for each `PlayerHitInfo`, send
-  `GamePacket::PlayerDied { id: victim_id }` to **every** client channel
-  (mirroring the server's all-clients broadcast).
+- Step 4b (immediately after `world.update`, **before** the Step 5 `PlayerPos`
+  loop and Step 6 `BulletSpawn` fan-out, mirroring `main.rs`'s order): for each
+  `PlayerHitInfo`, send `GamePacket::PlayerDied { id: victim_id }` to **every**
+  client channel.
 - Step 3: count client→server death reports — decode each drained packet and
   increment `pub client_death_reports: usize` when it is
   `GamePacket::PlayerDied { .. }` (it should always stay 0).

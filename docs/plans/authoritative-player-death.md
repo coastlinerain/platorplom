@@ -28,11 +28,14 @@ plan makes the **server the sole authority** on player death:
 Six boxes. Boxes 1–3 contain all the genuinely new logic and are the ones the
 tester can RED first; Boxes 4–6 are wiring.
 
-**Compilation state is expected to be RED between Box 1 and Box 5.** The protocol
-rename (Box 1) immediately breaks `server/src/main.rs`, `client/src/network/{transport,logging,world}.rs`
-and `client/src/world/lib.rs`, and those are only repaired in Boxes 4–5. Each
-box therefore has a *narrow* verification command (per-crate / `--lib`) that can
-pass on its own; the whole-workspace gate is Box 6's acceptance.
+**Compilation state is expected to be RED from the end of Box 1 through the end of
+Box 5.** The protocol rename (Box 1) immediately breaks `server/src/main.rs`,
+`client/src/network/{transport,logging,world}.rs` and `client/src/world/lib.rs`
+(repaired in Boxes 4–5); on top of that, `e2e/src/harness.rs`
+(`let shots = self.server.update(...)`) breaks at Box 3 and is only repaired in
+Box 6. Each box therefore has a *narrow* verification command (per-crate /
+`--lib`) that can pass on its own; the whole-workspace gate is Box 6's
+acceptance.
 
 ## Non-goals (hard constraints — do NOT do these)
 
@@ -164,7 +167,7 @@ shot).
 
 | # | Test | Setup and exact assertion |
 | --- | --- | --- |
-| S1 | `raycast_hits_player_same_room` | shooter 1 `(100,200,1.0)`, victim 2 `(400,200,1.0)`, both `(0,0)`. `assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), Some((2, 400.0)))`. |
+| S1 | `raycast_hits_player_same_room` | shooter 1 `(100,200,1.0)`, victim 2 `(400,200,1.0)`, both `(0,0)`. `assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), Some((2, 400.0)))`. Overlap clamp (same test): an origin inside the victim's rect → `assert_eq!(world.raycast_player(1, 410.0, 219.0, 1.0), Some((2, 410.0)))` (`d_near < 0` clamps `distance` to 0, so `hit_x == spawn_x`). |
 | S2 | `raycast_misses_player_in_other_room` | same positions, but `world.coords.insert(2, (0, 1))` → `assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), None)`. |
 | S3 | `raycast_blocked_by_wall` | same as S1; `world.levels[0][0].grid[5][5] = TileType::Wall` (row for `y = 219` is 5; col 5 is `x ∈ [200,240]`, inside the segment) → `assert_eq!(…, None)`; then `grid[5][5] = TileType::Empty` → `assert_eq!(…, Some((2, 400.0)))`. |
 | S4 | `raycast_first_hit_wins` | shooter 1 `(100,200)`, victim 2 `(300,200)`, victim 3 `(500,200)` → `assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), Some((2, 300.0)))`. |
@@ -231,6 +234,16 @@ overlap, no wall, hit at `hit_x = 400`.
 `last_deaths` is refreshed every tick, so E1/E2 must break out of the loop on the
 same tick the death appears (never read it after a later tick).
 
+Within a harness tick the `PlayerDied` fan-out happens **before** the `PlayerPos`
+and `BulletSpawn` fan-outs (Step 4b), mirroring `server/src/main.rs`. The victim's
+client therefore resets via `respawn_local` first and then receives the same
+tick's `BulletSpawn` — which is also what keeps
+`bullet_spawn.rs::test_e2e_bulletspawn_both_clients` passing (its two clients
+overlap at spawn, so the shooter's shot kills the observer at `distance = 0`; if
+`PlayerDied` arrived after `BulletSpawn`, `respawn_local` → `load_current_level`
+would clear the just-pushed `remote_bullets` and that test's
+`assert_eq!(client_b.world.remote_bullets.len(), 1)` would fail).
+
 ### Handoff order (what the tester can RED when)
 
 1. **Immediately RED-able (no wiring needed):** P1, G1–G5, and the S1–S10 shapes.
@@ -255,7 +268,7 @@ Run per crate to read the RED state without the unrelated compile cascade:
 | `client/src/network/logging.rs` | 6 (3 code arms + 3 test assertions) | exhaustive `match` on `GamePacket` + stale assertions |
 | `server/src/main.rs` | 5 (3 logging helpers, inbound arm, outgoing construction) | `packet_type_name` is exhaustive (no catch-all) |
 | `server/src/world.rs` `world.update(...)` | **7** bindings: L297, L306, L331, L482, L526, L532, L547 | tuple return; the 5 discarding calls (L266, L316, L353, L378, L402) need **no** change |
-| `e2e/src/harness.rs` | Step 3, Step 4, Step 6b | tuple return + new death fan-out + self-report counter |
+| `e2e/src/harness.rs` | Step 3, Step 4, Step 4b | tuple return + new death fan-out (immediately after Step 4, before `PlayerPos`/`BulletSpawn`) + self-report counter |
 | `client/src/world/lib.rs` | `use protocol::GamePacket;` | unused after the `Hit` send is deleted → `clippy -D warnings` |
 | e2e geometry | `TILE_SIZE = 40`; row 5 `y ≈ 201`; spawn centre `y = 119` sits on the row 2/3 boundary | do not put the PvP scenario on the spawn row |
 | determinism | `self.players` is a `HashMap` | sort `shoot_requests` by `player_id` before the second pass |
@@ -281,8 +294,8 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     changes.
 - **Acceptance**: `cargo test -p protocol` green (P1); `grep -rn 'Hit\|entity_id'
   protocol/src protocol/tests` → nothing. The rest of the workspace is
-  **expected to fail to compile** from here until Box 5 — do not "fix" it in
-  this box.
+  **expected to fail to compile** through Box 5 (and `e2e/src/harness.rs`
+  through Box 6) — do not "fix" it in this box.
 - **Test**: P1.
 - **Explain**
   - What:
@@ -362,10 +375,13 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     `w`/`h` hitbox, inclusive vertical overlap, `d_near`/`d_far`/`distance`/
     `hit_x`, `level.solid_between(spawn_x, hit_x, spawn_y)` occlusion, ascending
     victim ids, strict-`<` best — tie goes to the lower id).
-  - Add `fn respawn(&mut self, id: u8)`: `*self.players.get_mut(&id).expect(...)`
-    is **not** allowed in non-test code — use `if let Some(p) =
-    self.players.get_mut(&id) { *p = Player::new(id); }`,
-    `self.coords.insert(id, (0, 0));`,
+  - Add `fn respawn(&mut self, id: u8)` — **intentional deviation from the
+    spec's literal `*self.players.get_mut(&id) = Player::new(id)`** (that form
+    requires `Option::expect`/`unwrap`): use `if let Some(p) =
+    self.players.get_mut(&id) { *p = Player::new(id); }`, which is behaviorally
+    identical for a spawned id and keeps AGENTS.md's "no `unwrap`/`expect` in
+    non-test code" rule. Do not "restore" the spec's literal form in review.
+    Then `self.coords.insert(id, (0, 0));`,
     `self.pending.insert(id, PlayerInput::default());`. Do **not** touch
     `shoot_cooldown` / `max_seq`.
   - Add the new `#[cfg(test)] mod raycast_and_hit_tests` with S1–S10 and the
@@ -418,8 +434,13 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 - **Acceptance**: `cargo check -p metroidvania-server` green (lib **and** bin);
   `cargo test -p metroidvania-server` green (S1–S10 unaffected). `grep -rn
   'Hit { entity_id\|"Hit"\|entity_id' server` → nothing.
-- **Test**: S1–S10 still green; log-format behaviour is covered by the existing
-  packet-log e2e suites (`packet_log_rate`) at Box 6.
+- **Test**: S1–S10 still green. There is **no dedicated log-format coverage** for
+  `PlayerDied`: `e2e/tests/packet_log_rate.rs` only exercises
+  `PlayerInput` (`"type":"PlayerInput"`), so the renamed
+  `packet_type_name`/`packet_id`/`packet_key_fields` arms in `server/src/main.rs`
+  are compile-checked but not asserted by any test. Optional (not required by
+  the spec): add one `PlayerDied` line to that suite's expected-log check; do not
+  claim existing coverage.
 - **Explain**
   - What:
   - Why:
@@ -507,21 +528,35 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     - `tick`, Step 4: `let (shots, deaths) = self.server.update(tick_dt);` and
       after the `total_shots`/`last_shots` loop,
       `self.last_deaths.extend(deaths.iter().copied());`.
-    - `tick`, Step 6b (after the `BulletSpawn` fan-out, per the spec's wording):
-      for each `hit in &self.last_deaths`, serialize
+    - `tick`, **Step 4b** — immediately after Step 4 (`world.update` +
+      `last_deaths` fill) and **before** the Step 5 `PlayerPos` loop and Step 6
+      `BulletSpawn` fan-out (this mirrors `server/src/main.rs`'s mandated order:
+      update → `PlayerDied` → `PlayerPos` → `BulletSpawn`): for each
+      `hit in &self.last_deaths`, serialize
       `GamePacket::PlayerDied { id: hit.victim_id }` once and send it to
       **every** `self.to_clients` channel (mirrors the server's all-clients
       broadcast; includes the victim's own channel).
+      *Why this order and not after `BulletSpawn`: the victim's client must run
+      `respawn_local` (which clears `remote_bullets` via `load_current_level`)
+      before the same tick's `BulletSpawn` is applied. Placing the fan-out after
+      Step 6 breaks `e2e/tests/bullet_spawn.rs::test_e2e_bulletspawn_both_clients`,
+      where both clients spawn overlapping at `(100,100)` and the shooter's shot
+      kills the observer (`distance = 0`); the observer's `remote_bullets` would
+      be cleared after the spawn and `assert_eq!(…, 1)` at
+      `bullet_spawn.rs:200` would fail.*
     - Add `pub fn set_server_player_coords(&mut self, handle: ClientHandle, x:
       u8, y: u8)` delegating to `self.server.apply_input(player_id, x, y,
       PlayerInput::default(), 0)`.
     - `total_shots`/`last_shots` unchanged.
   - Create `e2e/tests/authoritative_death.rs` with `setup_pvp` + E1 + E2.
-- **Acceptance**: `cargo test -p e2e` green (E1–E2, the movement / multiplayer /
-  reconciliation / rooms / shoot / bullet_spawn / edge-case suites unchanged);
-  then the full gate: `cargo test --workspace`, `cargo fmt --check --all`,
+- **Acceptance**: `cargo test -p e2e` green — E1–E2 plus the movement /
+  multiplayer / reconciliation / rooms / shoot / edge-case suites. Note that
+  `bullet_spawn.rs::test_e2e_bulletspawn_both_clients` is **not**
+  ordering-neutral: it only keeps passing because the harness now delivers
+  `PlayerDied` before `BulletSpawn` in the same tick (see Step 4b). Then the
+  full gate: `cargo test --workspace`, `cargo fmt --check --all`,
   `cargo clippy --all-targets --all-features --workspace -- -D warnings`.
-- **Test**: E1–E2.
+- **Test**: E1–E2 (plus `bullet_spawn`, which pins the Step 4b ordering).
 - **Explain**
   - What:
   - Why:
@@ -543,10 +578,17 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   ```
 
 - [ ] No `Hit` variant remains; every other `GamePacket` variant is byte-identical.
-- [ ] `cargo test -p e2e` proves the pre-existing suites still pass (only the
-      `update` tuple ripple and the log renames touch shared code).
+- [ ] `cargo test -p e2e` proves the pre-existing suites still pass. Only the
+      `update` tuple ripple and the log renames touch shared code; additionally
+      `bullet_spawn.rs::test_e2e_bulletspawn_both_clients` depends on the new
+      PlayerDied-before-BulletSpawn harness ordering (Step 4b).
 - [ ] `PlayerInput.level_x/level_y` and client-claimed `coords` are still present
       (spec 3 owns them).
+- [ ] Process: update `docs/progress.md` (status + next actions: spec 3 is next),
+      add `docs/lessons.md` entries for `sort_by_key` as the determinism fix for
+      HashMap-driven bullet-id/hit order and for the `&self` raycast read
+      followed by the `&mut self` respawn write (borrow split), and record an ADR
+      for the 8 ambiguities resolved in this plan.
 
 ## Explain (commit body template — fill per box)
 
@@ -565,8 +607,9 @@ Each box is a small, independently verifiable step. The `implementer` fills the
  sending through self.to_clients>
 
 ## Watch out
-<the expected RED window between Box 1 and Box 5; the 7 destructure sites;
- impact-x bullet; TILE_SIZE = 40 / row 5; no room authority / no i-frames>
+<the expected RED window (end of Box 1 → end of Box 6 for the workspace); the 7
+ destructure sites; impact-x bullet; TILE_SIZE = 40 / row 5; harness Step 4b must
+ precede BulletSpawn or bullet_spawn.rs breaks; no room authority / no i-frames>
 ```
 
 ## Open questions / ambiguities (for the plan reviewer)
@@ -577,12 +620,14 @@ Each box is a small, independently verifiable step. The `implementer` fills the
    (and keeps `id = Some(1)` so the old self-report path would have fired). The
    alternative — `id = None` and asserting zero total sends — would make the
    test vacuous.
-2. **Harness death-broadcast position vs. `main.rs` order.** The spec puts the
-   harness fan-out at "Step 6b" (after `BulletSpawn`) but the server's tick order
-   is `PlayerDied` → `PlayerPos` → `BulletSpawn`. The plan follows each file's
-   explicit instruction. Harmless: the client ends at `(100,100)` either way
-   (same-tick `PlayerPos` already reports the respawn), but the two paths
-   exercise different packet orders — flag if the reviewer wants them aligned.
+2. **Harness death-broadcast position — RESOLVED: aligned with `main.rs`.** The
+   fan-out goes in the harness **immediately after Step 4** (`world.update`),
+   before the `PlayerPos` and `BulletSpawn` fan-outs, matching the spec's
+   "Ordering in the tick" (`update → PlayerDied → PlayerPos → BulletSpawn`).
+   Putting it after `BulletSpawn` is not just a cosmetic difference: the victim's
+   `respawn_local` → `load_current_level` clears `remote_bullets`, which would
+   fail `bullet_spawn.rs:200` in `test_e2e_bulletspawn_both_clients` (the two
+   clients overlap at spawn and the shot kills the observer at `distance = 0`).
 3. **`update` destructure count.** The spec says "≈6 sites"; there are **7**
    `let shots… = world.update(...)` bindings (L297, L306, L331, L482, L526,
    L532, L547) plus 5 discarding calls that need no change. Enumerated in
@@ -609,3 +654,9 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 8. **Leftward impact x.** `hit_x` on a leftward shot is the victim's right
    (near) edge; only the rightward case is pinned by S1/S7. Noted so the
    implementer does not special-case it.
+9. **Intentional deviation from the spec's `respawn` body.** The spec writes
+   `*self.players.get_mut(&id) = Player::new(id)`, which needs
+   `Option::expect`/`unwrap`; the plan uses
+   `if let Some(p) = self.players.get_mut(&id) { *p = Player::new(id); }`
+   instead, per AGENTS.md's no-`unwrap`-in-non-test-code rule. Behaviorally
+   identical for a spawned id — code review should not read this as drift.
