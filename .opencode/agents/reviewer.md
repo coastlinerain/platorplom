@@ -1,6 +1,7 @@
 ---
 description: Reviews plans and code for completeness, correctness, and idiomatic Rust
 mode: subagent
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"

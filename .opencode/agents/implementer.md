@@ -1,6 +1,7 @@
 ---
 description: Implements a plan, filling per-box Explain notes
 mode: subagent
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"
