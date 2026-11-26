@@ -13,6 +13,13 @@ pub struct BulletSpawnInfo {
     pub seq: u16,
 }
 
+/// One server-authoritative PvP kill detected in a tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerHitInfo {
+    pub shooter_id: u8,
+    pub victim_id: u8,
+}
+
 pub struct ServerWorld {
     players: HashMap<u8, Player>,
     pending: HashMap<u8, PlayerInput>,
@@ -92,8 +99,10 @@ impl ServerWorld {
     }
 
     /// Runs one authoritative tick.
-    /// Returns the `BulletSpawnInfo`s for accepted shots this tick.
-    pub fn update(&mut self, dt: f32) -> Vec<BulletSpawnInfo> {
+    /// Returns the `BulletSpawnInfo`s for accepted shots and the
+    /// `PlayerHitInfo`s for kills detected this tick. Victims are respawned
+    /// before this returns, so callers only need to broadcast the deaths.
+    pub fn update(&mut self, dt: f32) -> (Vec<BulletSpawnInfo>, Vec<PlayerHitInfo>) {
         let mut bullet_spawns = Vec::new();
 
         // First pass: update all players, collect shoot requests
@@ -155,24 +164,142 @@ impl ServerWorld {
             pending.shoot = false;
         }
 
-        // Second pass: assign bullet IDs and emit spawn info.
-        // There is no hit-detection target after the PvE removal (spec 1); the
-        // next spec re-adds server-authoritative PvP hit detection.
+        // Second pass: resolve shots against the post-movement positions.
+        //
+        // `self.players` is a `HashMap`, so sort first: this makes bullet-id
+        // assignment deterministic and credits a multi-shooter victim to the
+        // lowest shooter id.
+        //
+        // Hit tests see this tick's post-movement positions. Respawns are
+        // applied only after the loop, so a victim cannot be teleported
+        // mid-pass or hit twice in the same tick. A victim that also shot this
+        // tick still fires (its `ShootRequest` already exists).
+        shoot_requests.sort_by_key(|r| r.player_id);
+
+        let mut player_hits: Vec<PlayerHitInfo> = Vec::new();
+
         for req in shoot_requests {
+            let hit = self.raycast_player(req.player_id, req.spawn_x, req.spawn_y, req.dir);
+
             let bullet_id = self.next_bullet_id;
             self.next_bullet_id = self.next_bullet_id.wrapping_add(1);
             bullet_spawns.push(BulletSpawnInfo {
                 bullet_id,
-                x: req.spawn_x,
+                // On a hit the bullet starts at the impact x (owner decision);
+                // on a miss it keeps the historical origin spawn.
+                x: hit.map_or(req.spawn_x, |(_, hit_x)| hit_x),
                 y: req.spawn_y,
                 dir: req.dir,
                 owner_id: req.player_id,
                 seq: req.player_seq,
             });
+
+            if let Some((victim_id, _)) = hit {
+                // First shot in ascending shooter-id order wins; at most one
+                // death per victim per tick.
+                if !player_hits.iter().any(|h| h.victim_id == victim_id) {
+                    player_hits.push(PlayerHitInfo {
+                        shooter_id: req.player_id,
+                        victim_id,
+                    });
+                }
+            }
+        }
+
+        for hit in &player_hits {
+            self.respawn(hit.victim_id);
         }
 
         self.current_tick += 1;
-        bullet_spawns
+        (bullet_spawns, player_hits)
+    }
+
+    /// Casts a horizontal hitscan from the shooter's bullet origin and returns
+    /// the closest other player in the same room that is not behind a wall, as
+    /// `(victim_id, hit_x)`.
+    fn raycast_player(
+        &self,
+        shooter_id: u8,
+        spawn_x: f32,
+        spawn_y: f32,
+        dir: f32,
+    ) -> Option<(u8, f32)> {
+        let shooter_room = self.coords.get(&shooter_id).copied().unwrap_or((0, 0));
+        let level = self
+            .levels
+            .get(shooter_room.1 as usize)
+            .and_then(|row| row.get(shooter_room.0 as usize))
+            .unwrap_or(&self.levels[0][0]);
+
+        // Ascending victim-id iteration plus a strict `<` tie-break keeps the
+        // lower id on an exact distance tie.
+        let mut victims: Vec<u8> = self
+            .players
+            .keys()
+            .copied()
+            .filter(|&id| id != shooter_id)
+            .filter(|id| self.coords.get(id).copied().unwrap_or((0, 0)) == shooter_room)
+            .collect();
+        victims.sort_unstable();
+
+        let mut best: Option<(u8, f32, f32)> = None; // (victim_id, distance, hit_x)
+
+        for victim_id in victims {
+            let Some(victim) = self.players.get(&victim_id) else {
+                continue;
+            };
+
+            let cx = victim.pos.x + victim.w / 2.0;
+            let cy = victim.pos.y + victim.h / 2.0;
+            let left = cx - victim.w / 2.0;
+            let right = cx + victim.w / 2.0;
+
+            // Inclusive vertical overlap with the ray `y = spawn_y`.
+            if spawn_y < cy - victim.h / 2.0 || spawn_y > cy + victim.h / 2.0 {
+                continue;
+            }
+
+            let (near_edge, far_edge) = if dir >= 0.0 {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            let d_near = (near_edge - spawn_x) * dir;
+            let d_far = (far_edge - spawn_x) * dir;
+
+            // Whole rect is behind the origin.
+            if d_far < 0.0 {
+                continue;
+            }
+
+            // Overlapping the victim clamps to distance 0 → hit at the origin.
+            let distance = d_near.max(0.0);
+            let hit_x = spawn_x + dir * distance;
+
+            if level.solid_between(spawn_x, hit_x, spawn_y) {
+                continue;
+            }
+
+            let replace = match best {
+                Some((_, best_distance, _)) => distance < best_distance,
+                None => true,
+            };
+            if replace {
+                best = Some((victim_id, distance, hit_x));
+            }
+        }
+
+        best.map(|(victim_id, _, hit_x)| (victim_id, hit_x))
+    }
+
+    /// Resets a slain player to the canonical spawn and drops its held input.
+    /// `shoot_cooldown` and `max_seq` are intentionally left untouched.
+    fn respawn(&mut self, id: u8) {
+        if let Some(player) = self.players.get_mut(&id) {
+            *player = Player::new(id);
+        }
+        self.coords.insert(id, (0, 0));
+        self.pending.insert(id, PlayerInput::default());
     }
 
     /// Get current server tick number.
@@ -294,7 +421,7 @@ mod tests {
         );
 
         // Two shoot edges OR-latch into a single shot: exactly one is consumed.
-        let shots = world.update(tick_dt());
+        let (shots, _hits) = world.update(tick_dt());
         assert_eq!(shots.len(), 1);
         assert_eq!(shots[0].owner_id, 0);
         assert_eq!(shots[0].dir, 1.0);
@@ -303,7 +430,7 @@ mod tests {
         assert!(!world.pending[&0].shoot);
 
         // No re-fire on the next tick without a fresh input.
-        let shots2 = world.update(tick_dt());
+        let (shots2, _hits) = world.update(tick_dt());
         assert!(shots2.is_empty());
     }
 
@@ -328,7 +455,7 @@ mod tests {
         );
 
         // Tick 2: the latched edge fires instead of being dropped.
-        let shots = world.update(tick_dt());
+        let (shots, _hits) = world.update(tick_dt());
         assert_eq!(shots.len(), 1);
         assert_eq!(shots[0].owner_id, 0);
         assert_eq!(shots[0].dir, 1.0);
@@ -479,7 +606,7 @@ fn shoot_emits_bulletspawninfo() {
         5,
     );
 
-    let shots = world.update(1.0 / 60.0);
+    let (shots, _hits) = world.update(1.0 / 60.0);
 
     assert_eq!(shots.len(), 1);
     let shot = &shots[0];
@@ -523,13 +650,13 @@ fn shoot_cooldown_enforced() {
         },
         1,
     );
-    let shots1 = world.update(1.0 / 60.0);
+    let (shots1, _hits) = world.update(1.0 / 60.0);
     assert_eq!(shots1.len(), 1);
     assert_eq!(shots1[0].bullet_id, 0);
 
     // Tick 2-5: no input, cooldown counts down (4 ticks to go from 4 to 0)
     for _ in 0..4 {
-        let shots = world.update(1.0 / 60.0);
+        let (shots, _hits) = world.update(1.0 / 60.0);
         assert!(shots.is_empty());
     }
 
@@ -544,7 +671,7 @@ fn shoot_cooldown_enforced() {
         },
         5,
     );
-    let shots6 = world.update(1.0 / 60.0);
+    let (shots6, _hits) = world.update(1.0 / 60.0);
     assert_eq!(shots6.len(), 1);
     assert_eq!(shots6[0].bullet_id, 1); // Incremented
 }

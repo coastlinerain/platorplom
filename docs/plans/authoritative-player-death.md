@@ -351,7 +351,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 3 — `ServerWorld`: `PlayerHitInfo`, `raycast_player`, `respawn`, new `update`
 
-- [ ] done
+- [x] done
 - **Files**: `server/src/world.rs`.
 - **Change**:
   - Add `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct PlayerHitInfo {
@@ -410,10 +410,23 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   (it references `Hit`) — Box 4 fixes it.
 - **Test**: S1–S10.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Added `PlayerHitInfo`; rewrote `update`'s second pass to sort
+    `shoot_requests` by `player_id`, raycast each shot, spawn the bullet at the
+    impact x on a hit, dedupe victims to one death per tick, and respawn after
+    the loop. Added private `raycast_player` and `respawn`; destructured the 7
+    pre-existing `world.update` bindings.
+  - Why: The server must be the sole authority on PvP death: it resolves the
+    hit from authoritative post-movement positions, resets the victim, and
+    returns the kills for `main.rs` to broadcast.
+  - Rust concepts: tuple return + destructuring, `Option::map_or`,
+    `sort_by_key`/`sort_unstable` over `HashMap`-derived iteration, `&self`
+    borrow for the raycast followed by `&mut self` respawn after the loop,
+    `if let Some` instead of `unwrap`, `derive(Debug, Clone, Copy, PartialEq,
+    Eq)`.
+  - Watch out: impact-x bullets (not the origin), inclusive vertical overlap,
+    `distance = d_near.max(0.0)` for overlapping players, ascending victim-id
+    iteration with strict `<` for ties, and `TILE_SIZE = 40` row semantics. The
+    server binary still fails to compile until Box 4.
 
 ### Box 4 — `server/src/lib.rs` re-export + `server/src/main.rs`
 
