@@ -38,9 +38,9 @@ so an attacker cannot become unkillable by spoofing their room.
 
 ## 4. `fix/reconciliation-replay-dt` — *current* (next)
 
-Replay dt = `TICK_HZ` (not `CLIENT_HZ`); fold in `CLIENT_HZ` → `RENDER_HZ` as a separate commit.
+Replay dt = `TICK_HZ` (not `CLIENT_HZ`); `CLIENT_HZ` → `RENDER_HZ` as a separate commit.
 
-## 5. `refactor/single-interpolation-path`
+## 5. `refactor/single-interpolation-path` — *current* (next)
 
 Delete the legacy wall-clock `interpolate`/`interpolate_at`; keep only `interpolate_at_tick`.
 
