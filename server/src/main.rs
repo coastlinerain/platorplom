@@ -40,6 +40,8 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::Leave { .. } => "Leave",
         GamePacket::PlayerDied { .. } => "PlayerDied",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
+        GamePacket::RequestRoomChange { .. } => "RequestRoomChange",
+        GamePacket::RoomChangeResponse { .. } => "RoomChangeResponse",
     }
 }
 
@@ -51,6 +53,7 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::Leave { id } => Some(*id),
         GamePacket::PlayerDied { id } => Some(*id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
+        GamePacket::RequestRoomChange { id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -84,8 +87,6 @@ fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
         GamePacket::JoinResponse { assigned_id } => json!({ "assigned_id": assigned_id }),
         GamePacket::PlayerInput {
             id,
-            level_x,
-            level_y,
             move_left,
             move_right,
             jump,
@@ -93,7 +94,6 @@ fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
             seq,
         } => json!({
             "id": id,
-            "level": [level_x, level_y],
             "move_left": move_left,
             "move_right": move_right,
             "jump": jump,
@@ -134,6 +134,20 @@ fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
             "dir": dir,
             "owner_id": owner_id,
             "seq": seq,
+        }),
+        GamePacket::RequestRoomChange { id, direction } => {
+            json!({ "id": id, "direction": direction })
+        }
+        GamePacket::RoomChangeResponse {
+            accepted,
+            level_x,
+            level_y,
+            x,
+            y,
+        } => json!({
+            "accepted": accepted,
+            "level": [level_x, level_y],
+            "pos": [x, y],
         }),
     }
 }
@@ -186,8 +200,6 @@ fn main() {
                             }
                             GamePacket::PlayerInput {
                                 id,
-                                level_x,
-                                level_y,
                                 move_left,
                                 move_right,
                                 jump,
@@ -204,8 +216,6 @@ fn main() {
 
                                 world.apply_input(
                                     id,
-                                    level_x,
-                                    level_y,
                                     game::entities::player::PlayerInput {
                                         move_left,
                                         move_right,
@@ -214,6 +224,36 @@ fn main() {
                                     },
                                     seq,
                                 );
+                            }
+                            GamePacket::RequestRoomChange {
+                                id: packet_id,
+                                direction,
+                            } => {
+                                // Resolve the id from the transport map, exactly as
+                                // `PlayerInput` does; the packet id must agree.
+                                let Some(&resolved) = addrs.get(&addr) else {
+                                    continue;
+                                };
+                                if resolved != packet_id {
+                                    continue;
+                                }
+
+                                if let Some(info) = world.apply_room_change(resolved, direction) {
+                                    let response = GamePacket::RoomChangeResponse {
+                                        accepted: info.accepted,
+                                        level_x: info.room.0,
+                                        level_y: info.room.1,
+                                        x: info.pos.0,
+                                        y: info.pos.1,
+                                    };
+                                    log_packet("sent", &response);
+                                    if let Ok(bytes) = postcard::to_allocvec(&response) {
+                                        // Per-requester ack only: never broadcast
+                                        // another player's room to everyone.
+                                        let _ = packet_sender
+                                            .send(Packet::reliable_ordered(addr, bytes, None));
+                                    }
+                                }
                             }
                             GamePacket::Leave { id } => {
                                 println!("Player {} left voluntarily", id);
@@ -227,6 +267,9 @@ fn main() {
                             GamePacket::PlayerDied { .. } => {}
                             // Client-sent PlayerPos is no longer accepted — the server is authoritative.
                             GamePacket::PlayerPos { .. } => {}
+                            // Server→client only: a client must never send a room
+                            // ack. Ignore it (defense in depth).
+                            GamePacket::RoomChangeResponse { .. } => {}
                             _ => {}
                         }
                     }

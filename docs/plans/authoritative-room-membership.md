@@ -684,7 +684,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 4 — `server/src/main.rs`: request handling + logging
 
-- [ ] done
+- [x] done
 - **Files**: `server/src/main.rs`.
 - **Change**:
   - `packet_type_name` (exhaustive): add
@@ -716,14 +716,32 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   do not claim coverage.
 - **Test**: none new (compile + logging arms).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: exhaustive `match` arms on a growing enum,
-    `json!` with a derived-`Serialize` enum value, `HashMap::get` returning
-    `Option<&u8>` + `let-else`, `continue` in a nested drain loop, per-address
-    reliable send)_
-  - Watch out: _(response goes to the requester only; the packet id is ignored in
-    favour of the transport map; `PlayerInput` no longer has `"level"`)_
+  - What: added `RequestRoomChange`/`RoomChangeResponse` to
+    `packet_type_name`, the request to `packet_id`, and both to
+    `packet_key_fields` (dropping `"level"` from `PlayerInput`); the inbound
+    `PlayerInput` arm and `apply_input` call lost the room fields; a new inbound
+    `RequestRoomChange` arm resolves the id from `addrs`, calls
+    `apply_room_change`, and sends one `RoomChangeResponse` back to the
+    requesting `addr` via `reliable_ordered`; inbound `RoomChangeResponse` is
+    explicitly ignored.
+  - Why: the server, not the client, decides membership. The request carries
+    only a direction, the transport map decides *who* is asking, and the ack is
+    per-requester so no client ever learns/adopts another player's room from a
+    broadcast.
+  - Rust concepts: `packet_type_name`/`packet_key_fields` are exhaustive
+    `match`es, so a new enum variant is a compile error until handled
+    (`packet_id`/`packet_seq` already have `_` arms); `json!({ "direction":
+    direction })` works because `Direction` derives `Serialize` (a unit variant
+    becomes a string); `addrs.get(&addr)` yields `Option<&u8>` and
+    `let Some(&resolved) = … else { continue; }` both dereferences and exits the
+    enclosing `while let` drain loop; `postcard::to_allocvec` returns
+    `Result<Vec<u8>, _>`, handled with `if let Ok(bytes)` rather than the
+    file's existing `.unwrap()` style for the new path.
+  - Watch out: the response goes to `addr` only (never `addrs.keys()`); the
+    packet id must match the transport-resolved id (otherwise a client could
+    request a change for someone else); `main.rs` keeps its `.unwrap()` style
+    for the older sends, but the new arm avoids a new panic site; an unknown
+    player (`apply_room_change` → `None`) sends nothing.
 
 ### Box 5 — client: world state, request/ack primitives, remove the local transition
 
