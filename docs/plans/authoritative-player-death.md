@@ -430,7 +430,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 4 — `server/src/lib.rs` re-export + `server/src/main.rs`
 
-- [ ] done
+- [x] done
 - **Files**: `server/src/lib.rs`; `server/src/main.rs`.
 - **Change**:
   - `server/src/lib.rs`: replace the two lines with
@@ -470,10 +470,20 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   the spec): add one `PlayerDied` line to that suite's expected-log check; do not
   claim existing coverage.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Re-exported `PlayerHitInfo` from the server crate; renamed the three
+    logging arms, replaced the inbound `Hit` handler with an ignoring
+    `PlayerDied` arm, destructured `world.update`, and broadcast one
+    `PlayerDied { id: victim_id }` to every address before the `PlayerPos` and
+    `BulletSpawn` fan-outs.
+  - Why: `main.rs` is the only place that owns sockets, so it turns the server's
+    authoritative kill list into the reliable-ordered death notification. The
+    inbound arm is a no-op so a client can never forge a death.
+  - Rust concepts: `pub use` re-exports; match-arm rename; iterating a borrowed
+    `Vec<PlayerHitInfo>` while cloning serialized bytes for each destination;
+    `postcard::to_allocvec` + `bytes.clone()` to fan out one serialization.
+  - Watch out: tick order is update → `PlayerDied` → `PlayerPos` → `BulletSpawn`;
+    the victim is included in the broadcast; the old partial-rebroadcast loop is
+    gone.
 
 ### Box 5 — Client: drop self-report + client death collision, handle `PlayerDied`
 
