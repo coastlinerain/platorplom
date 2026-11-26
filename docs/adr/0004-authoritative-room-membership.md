@@ -48,11 +48,15 @@ Durable decisions, recorded so a future change has a reference point:
 6. **`force_teleport(id, room, pos)` bypasses `can_enter` and the cooldown.** It
    is `pub` for join/respawn/test setup only; no packet reaches it. It no-ops for
    an unspawned id.
-7. **Anti-ping-pong = client disarm + server cooldown.**
-   `ROOM_CHANGE_COOLDOWN_TICKS = 12` applies to *accepted* changes only; the
-   client sets `room_change_armed = false` after an accepted transition and
-   re-arms only after its body leaves every trigger band. Every current entry
-   sits inside the reverse door's band, so both halves are required.
+7. **Anti-ping-pong + anti-amplification = client disarm + server cooldown.**
+   `ROOM_CHANGE_COOLDOWN_TICKS = 6` applies to **both** accepted and rejected
+   changes; the client sets `room_change_armed = false` after an accepted
+   transition and re-arms only after its body leaves every trigger band **and**
+   is `grounded` (QA M1 — a jump must not re-arm mid-air and bounce back). Every
+   current entry sits inside the reverse door's band, so both halves are
+   required. While the cooldown is active the server returns `None` (no
+   response), so a modified client cannot spam rejected requests for response
+   amplification (QA m2).
 8. **Server-only lead tolerance.** `can_enter` validates against
    `Door::server_trigger()`: the geometric `trigger` grown by
    `DOOR_LEAD_TOLERANCE_PX = 8.0` on the approach edge (East: left, West: right,
@@ -69,6 +73,9 @@ Durable decisions, recorded so a future change has a reference point:
 10. **Input buffers are cleared on any room change** (accepted or rejected) so
     old-room inputs are not replayed into the new room and a snap-back is not
     undone by replay.
+11. **Room adoption is bounds-guarded.** `apply_room_change_local` early-returns
+    when the server-reported room is outside `levels_matrix` bounds (QA m1), so
+    a bogus room cannot index-panic the client on the next frame.
 
 ## Consequences
 
@@ -82,9 +89,12 @@ Durable decisions, recorded so a future change has a reference point:
   anti-bounce rule; the server cooldown is the malicious-client backstop.
 - **No lag compensation, still.** Hits resolve against the current tick's
   authoritative positions; a rejected door request snaps back and retries after
-  `ROOM_CHANGE_RETRY_TICKS = 6`. If real-world lead exceeds 8 px, an honest
-  client can still be briefly rejected (accepted; lag compensation is a separate
-  spec).
+  `ROOM_CHANGE_RETRY_TICKS = 6`.
+- **Known limitation (QA M2): door transitions under real network latency.** The
+  8 px lead tolerance absorbs ~40 ms RTT; beyond that the first request rejects
+  (self-heals via retry), and past ~75 ms RTT the player visibly stalls at the
+  door wall. Walk-through feel is a loopback/LAN property until a server-side
+  request grace window (plus a harness delay knob) is added.
 - **No wire migration.** Removing `PlayerInput`'s room fields changes that
   variant's payload and both sides are rebuilt from the same workspace.
 - **`protocol` now depends on `game`** for the shared `Direction` (no cycle;

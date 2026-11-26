@@ -131,7 +131,7 @@ impl Default for RoomGraph {
 }
 
 // game/src/config.rs (new constants, exact values)
-pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 12;
+pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 6;
 pub const ROOM_CHANGE_RETRY_TICKS: u8 = 6;
 pub const DOOR_LEAD_TOLERANCE_PX: f32 = 8.0;
 
@@ -226,19 +226,22 @@ Semantics the tester may rely on (all from the spec):
   `(0, 320, 48, 40)`, `(280, 432, 80, 48)`, `(280, 0, 80, 48)`.
 - `Rect::overlaps` is strict (`<`); entry positions live inside the reverse
   door's band (anti-bounce is handled by `room_change_armed` + cooldown).
-- `apply_room_change` returns `None` only for an unknown player. Rejections
-  return `Some(RoomChangeInfo { accepted: false, room: from, pos: (pos.x, pos.y) })`
+- `apply_room_change` returns `None` for an unknown player OR while the cooldown
+  is active (no response). Rejections arm the cooldown and return
+  `Some(RoomChangeInfo { accepted: false, room: from, pos: (pos.x, pos.y) })`
   and mutate nothing. Acceptance sets `coords`, `pos = door.entry`, zero velocity,
   recomputes `grounded` from the **target** level, and preserves `dir`, `bullets`,
-  `pending`, `shoot_cooldown`, `max_seq`; it arms the cooldown to 12.
+  `pending`, `shoot_cooldown`, `max_seq`; it arms the cooldown to 6.
 - `update` decrements every cooldown entry with `saturating_sub(1)` once per tick
-  (put it at the top of `update`). Cooldown is only set on acceptance.
+  (put it at the top of `update`). Cooldown is set on **both** acceptance and
+  rejection (at most one `RoomChangeResponse` per player per window).
 - `force_teleport` never checks doors/cooldown and sends nothing; it is
   `pub` only for join/respawn/test setup.
 - `request_room_change` order: no id → return; pending → return; retry > 0 →
   decrement and return; build a rect from predicted `player.pos` and test it
   against the door's **raw geometric** `trigger` via `door_at`; `None` →
-  `armed = true`; `Some && !armed` → return; `Some && armed` → send one
+  `armed = true` only if `player.grounded`; `Some && !armed` → return;
+  `Some && armed` → send one
   reliable-ordered `RequestRoomChange` and set `pending`. Because the client
   predicts ~one tick ahead, the normal walk-in request arrives while the server's
   authoritative rect is still a few px short of the geometric band; the server's
@@ -332,7 +335,7 @@ fn tick() -> f32 { 1.0 / 60.0 }
 | S3 | `apply_room_change_rejects_beyond_lead_tolerance` | `place(1, 700.0, 320.0, 1.0)`; `East` → `!accepted`, `room == (0,0)`, `pos == (700.0, 320.0)`, coords unchanged. |
 | S4 | `apply_room_change_rejects_no_door` | `place(1, 100.0, 100.0, 1.0)`; `North` then `West` → `!info.accepted`, `info.room == (0, 0)`, `info.pos == (100.0, 100.0)`; coords and player pos unchanged after both. |
 | S5 | `apply_room_change_rejects_off_trigger` | `place(1, 100.0, 200.0, 1.0)`; `East` → rejected; coords `(0,0)`, pos `(100,200)` unchanged. |
-| S6 | `apply_room_change_rejects_during_cooldown` | `place(1, 766.0, 320.0, 1.0)`; first `East` accepted; immediate `West` → `!accepted`, room `(1,0)`, pos `(10.0, 321.0)`; run `world.update(tick())` `ROOM_CHANGE_COOLDOWN_TICKS` times; the same `West` is now accepted, `room == (0,0)`, `pos == (760.0, 321.0)`, coords `(0,0)`. (Only the cooldown blocks the reverse; the entry overlaps the West band.) |
+| S6 | `apply_room_change_rejects_during_cooldown` | `place(1, 766.0, 320.0, 1.0)`; first `East` accepted; immediate `West` → returns `None` (cooldown active, no response); run `world.update(tick())` `ROOM_CHANGE_COOLDOWN_TICKS` times; the same `West` is now accepted, `room == (0,0)`, `pos == (760.0, 321.0)`, coords `(0,0)`. (Only the cooldown blocks the reverse; the entry overlaps the West band.) |
 | S7 | `apply_room_change_teleports_to_entry` | `place(1, 766.0, 320.0, -1.0)`; push one bullet: `world.players.get_mut(&1).unwrap().bullets.push(Bullet::new(Vec2::new(1.0, 1.0), 1.0, 1))`; `world.apply_input(1, PlayerInput { move_right: true, jump: true, ..Default::default() }, 9)`; `world.shoot_cooldown.insert(1, 3)`; accept `East`; pos exactly `(10.0, 321.0)`, `vel == Vec2::ZERO`, `dir == -1.0`, `grounded == true` (recomputed from the target level at `(10,321)`, where row 9 under the entry is wall), `bullets.len() == 1` (preserved), `pending[&1].move_right && pending[&1].jump`, `shoot_cooldown[&1] == 3`, `max_seq()[&1] == 9`. |
 | S8 | `apply_input_never_changes_coords` | `place(1, 100.0, 100.0, 1.0)`; `force_teleport(1, (1,0), (100.0, 100.0))`; `apply_input(1, PlayerInput { move_right: true, ..Default::default() }, 1)` → coords still `(1,0)`. `world.respawn(1)` → coords `(0,0)`; `apply_input(1, …, 2)` → coords still `(0,0)` (the spec-2 respawn-overwrite bug). |
 | S9 | `respawn_ignores_door_validation` | `place(1, 100.0, 100.0, 1.0)`; `force_teleport(1, (1,1), (10.0, 401.0))`; `world.respawn(1)` succeeds → coords `(0,0)`, pos `(100.0, 100.0)`. No request, no `can_enter`. |
@@ -1109,3 +1112,17 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     asserting the coords are never `(0,0)` and end at `(1,0)`. This keeps the
     "never returns to `(0,0)`" assertion about the reject/snap-back loop, not
     about refusing to cross another door.
+16. **Post-implementation QA fixes (recorded as deviations).** After code review
+    and QA, the owner approved four behavior changes that differ from this plan:
+    (a) `request_room_change` re-arms only when `player.grounded` (QA M1 — jump
+    bounce); (b) `apply_room_change_local` bounds-guards the adopted room (QA m1
+    — index-panic defense); (c) `ROOM_CHANGE_COOLDOWN_TICKS` 12 → 6 (QA m5 —
+    backtrack feel); (d) rejections arm the cooldown and an active cooldown
+    returns `None` (QA m2 — response-amplification). These are captured in the
+    spec's Decisions 18–21. The plan's per-box `Explain` and test tables above
+    still describe the pre-fix semantics in a few places (e.g. S6's
+    during-cooldown assertion, the cooldown constant) — the spec is the source of
+    truth for the final behavior; the follow-up test batch (`bb4712d`, `81a67b4`)
+    implements it. Also, the tester's original RED batch omitted C8–C11 (added by
+    the implementer in Box 6) — a defensible split per this plan's own Box 5/Box 6
+    table, recorded here for honesty.

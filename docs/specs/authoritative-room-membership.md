@@ -227,13 +227,15 @@ HashMap<u8, u8>` (ticks). `server/src/main.rs` handles each inbound
 2. `from = coords.get(&id).copied().unwrap_or((0, 0))`.
 3. Build the player's authoritative rect from `player.pos`, `player.w`,
    `player.h`.
-4. **Cooldown:** if `room_change_cooldown[id] > 0`, reject. Return
-   `RoomChangeInfo { accepted: false, room: from, pos: (player.pos.x,
-   player.pos.y) }`.
+4. **Cooldown:** if `room_change_cooldown[id] > 0`, return `None` (no
+   response). The client already has one outstanding request, so an honest
+   client never triggers this; returning `None` (rather than a rejection)
+   prevents a modified client from eliciting a response per packet.
 5. **Connectivity + position:** if
-   `!room_graph.can_enter(from, direction, rect)`, reject the same way as
-   step 4 (current room + `(player.pos.x, player.pos.y)`). `can_enter` validates
-   against `Door::server_trigger` (the geometric band plus
+   `!room_graph.can_enter(from, direction, rect)`, arm the cooldown
+   (`room_change_cooldown.insert(id, ROOM_CHANGE_COOLDOWN_TICKS)`) and return a
+   rejection (current room + `(player.pos.x, player.pos.y)`). `can_enter`
+   validates against `Door::server_trigger` (the geometric band plus
    `DOOR_LEAD_TOLERANCE_PX` on the approach edge), not the raw `trigger`.
 6. **Accept:**
    - `let door = room_graph.door(from, direction)` (guaranteed `Some` by step
@@ -260,7 +262,9 @@ position on rejection (so the client has a precise snap-back target).
 `update` decrements every entry of `room_change_cooldown` with
 `saturating_sub(1)` once per tick. The cooldown exists to stop a modified
 client from ping-ponging through a door at packet rate to flicker its room and
-dodge a shooter's raycast. It is set only on acceptance.
+dodge a shooter's raycast, and to rate-limit rejected requests (response
+amplification). It is set on **both** acceptance and rejection, so a player
+elicits at most one `RoomChangeResponse` (accept or reject) per window.
 
 `spawn` initializes `room_change_cooldown[id] = 0`; `remove` drops the entry.
 
@@ -606,9 +610,10 @@ RoomChangeResponse {
 New named constants in `game/src/config.rs` (no magic numbers at call sites):
 
 ```rust
-/// Server: minimum ticks between accepted room changes for one player.
-/// ~200 ms at 60 Hz. Tunable if door ping-pong becomes a real problem.
-pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 12;
+/// Server: minimum ticks between room-change responses (accept or reject) for
+/// one player. ~100 ms at 60 Hz. Arms on both acceptance and rejection, so a
+/// modified client cannot spam rejected requests for response amplification.
+pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 6;
 
 /// Client: ticks to wait after a rejected request before retrying.
 pub const ROOM_CHANGE_RETRY_TICKS: u8 = 6;
@@ -966,9 +971,12 @@ Decisions made while writing this spec:
 14. **Reliability:** `RequestRoomChange` and `RoomChangeResponse` are
     reliable-ordered; `PlayerPos` stays unreliable. Own-`PlayerPos` room
     adoption covers the cross-stream ordering case.
-15. **Anti-ping-pong:** accepted room changes are rate-limited by
-    `ROOM_CHANGE_COOLDOWN_TICKS` per player; rejections return the current
-    authoritative state so the client can snap back.
+15. **Anti-ping-pong + anti-amplification:** room changes are rate-limited by
+    `ROOM_CHANGE_COOLDOWN_TICKS` (= 6) per player, armed on **both** acceptance
+    and rejection, so at most one `RoomChangeResponse` per player per window.
+    While the cooldown is active the server returns `None` (no response).
+    Rejections return the current authoritative state so the client can snap
+    back.
 16. **Both sides authoritative:** the shooter's and the victim's rooms are
     read from `coords` for hit detection, and `coords` now changes only via
     the validated paths. This closes QA MAJOR-2 for both roles.
@@ -979,6 +987,28 @@ Decisions made while writing this spec:
     geometric trigger. This absorbs ~one tick of prediction lead so a normal
     walk-in's first request is accepted; authority is preserved because the
     player must still be at/near the door (no arbitrary teleport).
+
+Decisions made during the code-review / QA follow-up (after implementation):
+
+18. **Grounded-gated re-arm (QA M1):** `request_room_change` re-arms
+    (`room_change_armed = true`) only when the predicted body is outside every
+    band **and** `world.player.grounded`. Without this, a jump out of the entry
+    band re-arms mid-air and re-entering the band on descent sends a reverse
+    request, bouncing the player back to the previous room.
+19. **Bounds guard on room adoption (QA m1):** `apply_room_change_local`
+    early-returns when the server-reported room is outside `levels_matrix`
+    bounds, so a bogus room cannot index-panic the client on the next frame.
+20. **Cooldown value (QA m5):** `ROOM_CHANGE_COOLDOWN_TICKS` was 12 (~200 ms);
+    tuned to 6 (~100 ms) to reduce the immediate-backtrack stutter.
+21. **Rate-limit on rejection (QA m2):** rejections arm the cooldown and an
+    active cooldown returns `None` (no response), closing the response-
+    amplification hole where a modified client spams invalid requests.
+
+Known limitation (QA M2, recorded not fixed): the 8 px lead tolerance
+(`DOOR_LEAD_TOLERANCE_PX`) absorbs only ~1.2 ticks (~40 ms RTT) of prediction
+lead. On the internet the first request can still reject (self-heals via
+`ROOM_CHANGE_RETRY_TICKS`), and past ~75 ms RTT the player visibly stalls at
+the door wall. This is out of scope for this spec; see Follow-up.
 
 ## Gotchas (for the implementer / planner)
 
@@ -1016,9 +1046,9 @@ Decisions made while writing this spec:
   the client's matrix indexing type in this spec.
 - **The entry position is inside the reverse door's trigger.** Every current
   entry sits in the band of the door that leads back. The client's
-  `room_change_armed = false` and the server's cooldown are both required;
-  without them an honest client would immediately bounce and a malicious one
-  could ping-pong.
+  `room_change_armed = false` (re-armed only when grounded and out of every
+  band — QA M1) and the server's cooldown are both required; without them an
+  honest client would bounce back on a jump and a malicious one could ping-pong.
 - **`apply_room_change` must preserve `pending` input.** Unlike `respawn`, it
   must not reset `pending`, `shoot_cooldown`, or `max_seq`; the player is
   still moving through the door.
@@ -1055,12 +1085,20 @@ Decisions made while writing this spec:
   beyond the tolerance can still reject → snap back → retry after
   `ROOM_CHANGE_RETRY_TICKS`; that is acceptable and out of scope (lag
   compensation is deferred).
-- **`docs/adr/0004-*.md` is a follow-up**, not part of this spec task.
+- **`docs/adr/0004-*.md` is recorded after implementation**, not part of the
+  code task itself.
 
 ## Follow-up
 
 - Record `docs/adr/0004-authoritative-room-membership.md` after implementation
   (door graph, request/ack, server teleport, cooldown).
+- **Known limitation (QA M2): door transitions under real network latency.** The
+  8 px lead tolerance absorbs ~40 ms RTT; beyond that the first request rejects
+  (self-heals), and past ~75 ms RTT the player visibly stalls at the door wall.
+  A future fix is a server-side request grace window (accept once the
+  authoritative body reaches the band within N ticks) plus a configurable
+  harness one-way-delay knob so this is testable. Until then, walk-through feel
+  is a loopback/LAN property.
 - `feat/lag-compensation` (deferred): rewind victim positions to the shooter's
   render time. This spec resolves hits against current authoritative positions.
 - `feat/world-snapshot-batching` (deferred): one snapshot per tick instead of

@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-26 (authoritative-room-membership COMPLETE — door graph + RequestRoomChange/RoomChangeResponse; 241 tests green; ADR-0004; spec 3 of netcode-hardening roadmap)
+> Last updated: 2026-11-26 (authoritative-room-membership COMPLETE — door graph + RequestRoomChange/RoomChangeResponse; 247 tests green after QA fix batch; ADR-0004; spec 3 of netcode-hardening roadmap)
 
 ## Current status
 
@@ -132,18 +132,29 @@ Working memory for the project. **Update this at the end of every task.**
       `coords_match` removed
 - [x] Box 7 — e2e: per-requester harness routing, `force_teleport` fixture,
       E1–E6/B1–B9/F1 green
-- [x] 241 passed / 3 ignored; fmt + clippy clean; grep clean
-- [x] ADR-0004 accepted
+- [x] Code review APPROVE-WITH-MINOR; QA done (2 MAJOR + minors → 4 fixes approved)
+- [x] QA fix batch RED (`bb4712d`) → GREEN (`81a67b4`): grounded re-arm (M1),
+      bounds guard (m1), cooldown 12→6 (m5), reject rate-limit (m2)
+- [x] 247 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
+- [x] ADR-0004 accepted (11 decisions; M2 latency limitation recorded)
 
 ## Next actions (top = do first)
 
 1. **Merge spec 3 → dev** — `feat/authoritative-room-membership` is complete and
-   green (241 passed / 3 ignored; fmt + clippy clean; grep clean). The owner
+   green (247 passed / 3 ignored; fmt + clippy clean; grep clean). The owner
    validates, then opens/merges the PR. Do not merge from the agent.
 2. **Spec 4 — `fix/reconciliation-replay-dt`** (next roadmap item) — replay dt
    should be `TICK_HZ`, not `CLIENT_HZ`; fold in `CLIENT_HZ` → `RENDER_HZ` as a
    separate commit. Then roadmap spec 5 (`refactor/single-interpolation-path`).
-3. **Spec 2 QA follow-ups (deferred, record for owner)**:
+3. **Spec 3 QA follow-ups (deferred, record for owner)**:
+   - **M2 (latency):** 8 px lead tolerance ≈ 40 ms RTT; internet play stalls at
+     doorways. Future fix: server request grace window + harness one-way-delay
+     knob (recorded in spec/ADR). Loopback/LAN-only until then.
+   - Rejection rate-limit is now in place (m2); consider whether the 6-tick
+     cooldown feel is right after playtesting.
+   - QA minors m6/m7 (non-building RED commit; Explain written 3×) — process
+     notes for future specs, not code.
+4. **Spec 2 QA follow-ups (deferred, record for owner)**:
    - Spawn-kill loop: global `(0,0)` spawn + no i-frames + 83ms cooldown lets an
      attacker kill a respawning player repeatedly. Cheapest fix: `invuln_until_tick`
      map in `raycast_player`; real fix is room-local/checkpoint spawns.
