@@ -100,7 +100,8 @@ pub fn request_room_change(world: &mut World) {
         world.player.h,
     );
 
-    // Detection uses the raw geometric trigger, never `server_trigger`.
+    // Detection uses the raw geometric trigger, never the server's
+    // lead-expanded validation rect.
     match world.room_graph.door_at(world.current_room(), rect) {
         // Left every trigger band: safe to detect again.
         None => world.room_change_armed = true,

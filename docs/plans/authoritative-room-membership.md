@@ -886,7 +886,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 7 — e2e harness + new suite + choreography
 
-- [ ] done
+- [x] done
 - **Files**: `e2e/src/harness.rs`; `e2e/tests/authoritative_room_membership.rs`
   (new); `e2e/tests/rooms.rs`; `e2e/tests/edge_cases.rs`.
 - **Change**:
@@ -929,18 +929,34 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   `cargo clippy --all-targets --all-features --workspace -- -D warnings`.
 - **Test**: E1–E6 (+ the tester's B1–B9 and F1 pin the choreography).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: `iter().enumerate()` for per-client routing,
-    `HashMap<ClientHandle, usize>` counters, serializing once and cloning bytes,
-    `expect` in test/harness code, `force_teleport` with a preserved tuple
-    position, struct-field additions)_
-  - Watch out: _(Step 3 must answer the requesting client only — a broadcast makes
-    every client adopt another player's room; door detection reads the predicted
-    position, so the client must be staged too; b2/b4/b6/b8 must leave the entry
-    band and outlive the cooldown; the 8 px lead tolerance is server-only and must
-    not leak into `door_at`; f1's old assertion and name describe the behavior
-    this spec deletes)_
+  - What: harness dropped the `PlayerInput` room fields, handles
+    `RequestRoomChange` per client with `iter().enumerate()` (answering
+    `to_clients[i]` only), counts requests/rejects and per-client responses,
+    calls `request_room_change` in Step 7c, and `set_server_player_coords` now
+    uses `force_teleport` while preserving the current position. The tester's
+    E1–E6/B1–B9/F1 fixtures then pass.
+  - Why: the harness must mirror the real server's per-requester ack routing,
+    otherwise a broadcast would make every client adopt another player's room
+    and hide the cheat; and because detection reads the predicted body, the
+    fixtures must stage the client too, plus leave the entry band and outlast
+    the cooldown when reversing.
+  - Rust concepts: `for (i, rx) in self.from_clients.iter().enumerate()` gives
+    the paired `to_clients[i]` without `needless_range_loop` (clippy `-D
+    warnings`); field-level borrows let the loop hold `&self.from_clients` while
+    mutating `self.server`, `self.client_room_change_requests`, and
+    `self.to_clients[i]` (disjoint fields, not a whole-`&mut self` method call);
+    `HashMap<ClientHandle, usize>` with `.entry(handle).or_insert(0)` is a
+    per-client counter; `force_teleport(player_id, (x, y), (px, py))` passes a
+    preserved `(f32, f32)` tuple; `postcard::to_allocvec` bytes are moved into
+    the one recipient's channel; test code may `expect` (unlike library code).
+  - Watch out: Step 3 must answer the requesting client only; the packet id is
+    ignored in favour of the client index (the real server uses the transport
+    map); the client must be staged at the door because detection is predicted;
+    b2/b4/b6/b8 must leave the entry band for a tick and wait
+    `ROOM_CHANGE_COOLDOWN_TICKS`; the 8 px tolerance is server-only (E6 is the
+    only test that relies on it); `set_server_player_coords` must read the
+    position before `force_teleport` zeroes velocity; f1's old name/assertion
+    described deleted behavior.
 
 ## Definition of done
 
