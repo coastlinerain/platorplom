@@ -596,3 +596,9 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `server/src/world.rs` (`raycast_player`).
 - **What it is**: the ray math is `d_near = (near_edge - spawn_x) * dir` and `hit_x = spawn_x + dir * distance`. The spec says "only the sign of `dir` matters", which is true only while `dir ∈ {−1.0, 1.0}`. Today `Player.dir` is ±1.0, so it holds; but the invariant is implicit, and a `dir` with `|dir| ≠ 1` would silently scale both the hit point and the closest-hit ordering.
 - **Gotcha / insight**: when a function's contract is "only the sign matters", make the code say so — normalize `let dir = dir.signum()` at the top — rather than trusting the caller. This is the flagged (MINOR) hardening from QA; the lesson is to encode the invariant instead of documenting it.
+
+### Sim rate vs render rate — why `TICK_HZ` and `RENDER_HZ` are two constants (2026-11-26)
+
+- **Where**: `game/src/config.rs` (`TICK_HZ`, `RENDER_HZ`), `client/src/network/prediction.rs` (`reconcile`).
+- **What it is**: reconciliation re-simulates the player's unacknowledged inputs at a fixed `dt`. That `dt` must match the **simulation** rate the server uses (`TICK_HZ`), not the client's **render** rate. The two were both 60 and shared one constant (`CLIENT_HZ`), so the bug was latent — a wrong `dt` only shows up if the display refresh and the tick rate ever diverge (e.g. a 144 Hz monitor). Spec 4 pointed `replay_dt` at `TICK_HZ` and renamed the leftover constant to `RENDER_HZ`.
+- **Gotcha / insight**: two values that happen to be equal are still two concepts. Naming them the same (or, worse, one `magic 60`) hides the divergence risk until a real monitor/network configuration exposes it. A `pub` constant in a lib crate is part of the public surface and is not flagged as dead code by the compiler — "unused" and "wrong" are different problems, and only the compiler checks the second.

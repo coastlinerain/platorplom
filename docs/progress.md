@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-26 (authoritative-player-death COMPLETE — server-authoritative PvP raycast + PlayerDied; 198 tests green; ADR-0003; spec 2 of netcode-hardening roadmap)
+> Last updated: 2026-11-26 (reconciliation-replay-dt COMPLETE — replay at TICK_HZ + CLIENT_HZ→RENDER_HZ rename; spec 4 of netcode-hardening roadmap)
 
 ## Current status
 
@@ -114,7 +114,23 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] 198 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
 - [x] ADR-0003 accepted
 
+## Authoritative room membership checklist — feature (`feat/authoritative-room-membership`)
+- [x] Spec written; plan approved (2 review passes)
+- [x] RED tests (G/P/S/C/E), then 7-box implementer, code review, QA
+- [x] QA fix batch: grounded re-arm (M1), bounds guard (m1), cooldown 12→6 (m5), reject rate-limit (m2)
+- [x] 247 passed / 3 ignored; ADR-0004; M2 latency limitation recorded as issue
+
+## Reconciliation replay-dt fix — fix (`fix/reconciliation-replay-dt`)
+- [x] `reconcile` replays at `TICK_HZ` (was `CLIENT_HZ`) — `84785a3`
+- [x] `CLIENT_HZ` → `RENDER_HZ` rename (kept, documented-as-unused) — `a6628a8`
+- [x] 198 passed / 3 ignored (dev base); fmt + clippy clean
+
 ## Next actions (top = do first)
+
+1. **Merge spec 3 → dev, then rebase spec 4** — `fix/reconciliation-replay-dt` is
+   branched from `dev` (spec-2 base) and touches the same memory docs as the
+   unmerged spec 3 branch. Merge spec 3 first, then rebase spec 4 onto dev and
+   resolve the roadmap/progress/lessons overlap. See roadmap spec 4.
 
 1. **Merge spec 1 → dev, then rebase spec 2** — `feat/authoritative-player-death`
    is stacked on `refactor/remove-pve-enemies` (PR #8, not yet in `dev`). Merge
