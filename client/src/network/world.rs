@@ -293,3 +293,163 @@ pub fn send_join_req(network: &mut dyn PacketIO) {
     let join_msg = GamePacket::JoinRequest;
     network.send(join_msg);
 }
+
+// NOTE (tester, spec 2 — authoritative player death): these tests compile
+// against the planned `GamePacket::PlayerDied` handler and
+// `client::world::lib::respawn_local`; they are RED until Boxes 1 + 5 land.
+#[cfg(test)]
+mod tests {
+    use super::handle_packet;
+    use crate::network::packet_io::PacketIO;
+    use crate::world::game::World;
+    use game::config::TICK_HZ;
+    use game::entities::bullet::Bullet;
+    use game::entities::nemesis::Nemesis;
+    use game::maps::Map;
+    use glam::Vec2;
+    use protocol::GamePacket;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Shared send log: the fake `PacketIO` pushes into it, the test reads it.
+    #[derive(Clone, Default)]
+    struct Sends(Rc<RefCell<Vec<GamePacket>>>);
+
+    struct RecordingPacketIO {
+        sent: Sends,
+    }
+
+    impl PacketIO for RecordingPacketIO {
+        fn try_recv(&mut self) -> Option<GamePacket> {
+            None
+        }
+
+        fn send(&mut self, packet: GamePacket) {
+            self.sent.0.borrow_mut().push(packet);
+        }
+    }
+
+    fn make_world() -> (World, Sends) {
+        let sends = Sends::default();
+        let world = World::new(
+            Map::new(),
+            Box::new(RecordingPacketIO {
+                sent: sends.clone(),
+            }),
+        );
+        (world, sends)
+    }
+
+    /// C1 — `PlayerDied` for our own id rebuilds the local player from the
+    /// canonical spawn, resets room/clock state, and sends nothing at all
+    /// (`handle_packet` never sends).
+    #[test]
+    fn player_died_for_self_respawns_local_player() {
+        let (mut world, sent) = make_world();
+        world.id = Some(7);
+        world.player.id = 7;
+        world.player.pos = Vec2::new(500.0, 300.0);
+        world.player.vel = Vec2::new(1.0, 2.0);
+        world.player.grounded = true;
+        world.player.dir = -1.0;
+        world.current_coords = (0, 1);
+        world.client_tick = 42;
+        world.server_tick_offset = -3;
+        world.clock_offset_ms = 99;
+        world.last_server_tick = 7;
+        world.last_server_time_ms = 8;
+        world.last_acked_server_tick = 9;
+
+        handle_packet(&mut world, GamePacket::PlayerDied { id: 7 });
+
+        assert_eq!(world.player.pos, Vec2::new(100.0, 100.0));
+        assert_eq!(world.player.vel, Vec2::ZERO);
+        assert_eq!(world.player.dir, 1.0);
+        assert!(!world.player.grounded);
+        assert_eq!(world.player.id, 7);
+        assert_eq!(world.current_coords, (0, 0));
+
+        // All six clock-sync fields zeroed.
+        assert_eq!(world.client_tick, 0);
+        assert_eq!(world.server_tick_offset, 0);
+        assert_eq!(world.clock_offset_ms, 0);
+        assert_eq!(world.last_server_tick, 0);
+        assert_eq!(world.last_server_time_ms, 0);
+        assert_eq!(world.last_acked_server_tick, 0);
+
+        // Interpolation source snapped to the respawn state.
+        assert_eq!(world.prev_player_pos, world.player.pos);
+        assert_eq!(world.prev_player_dir, world.player.dir);
+
+        // Bullet tracking cleared.
+        assert!(world.bullets.is_empty());
+        assert!(world.spawned_bullet_ids.is_empty());
+        assert!(world.confirmed_bullets.is_empty());
+
+        // `handle_packet` never sends (the self-report path is gone).
+        assert!(sent.0.borrow().is_empty());
+    }
+
+    /// C2 — `PlayerDied` for a remote id drops the stale `Nemesis` and its
+    /// interpolation state, leaving other remotes and the local player alone.
+    #[test]
+    fn player_died_for_remote_removes_nemesis() {
+        let (mut world, _sent) = make_world();
+        world.id = Some(1);
+        world
+            .other_players
+            .insert(2, Nemesis::new(2, Vec2::new(400.0, 200.0)));
+        world.other_interp.entry(2).or_default();
+        // Control: an unrelated remote must survive.
+        world
+            .other_players
+            .insert(3, Nemesis::new(3, Vec2::new(500.0, 200.0)));
+        world.other_interp.entry(3).or_default();
+
+        handle_packet(&mut world, GamePacket::PlayerDied { id: 2 });
+
+        assert!(!world.other_players.contains_key(&2));
+        assert!(!world.other_interp.contains_key(&2));
+        assert!(world.other_players.contains_key(&3));
+        assert!(world.other_interp.contains_key(&3));
+        assert_eq!(world.id, Some(1));
+        // The local player is untouched by a remote death.
+        assert_eq!(world.player.pos, Vec2::new(100.0, 100.0));
+    }
+
+    /// C3 — a remote bullet overlapping the local player is purely visual: no
+    /// teleport and **zero `PlayerDied` sends**. A `PlayerInput` heartbeat is
+    /// still expected because `world.id.is_some()` — do not assert zero sends.
+    #[test]
+    fn remote_bullet_contact_does_not_kill_or_send() {
+        let (mut world, sent) = make_world();
+        world.id = Some(1);
+        // The bullet's owner must exist or `update_remote_bullets_position`
+        // retains it away.
+        world
+            .other_players
+            .insert(2, Nemesis::new(2, Vec2::new(400.0, 200.0)));
+        // Overlaps the local rect 100..130 × 100..138.
+        world
+            .remote_bullets
+            .push(Bullet::new(Vec2::new(110.0, 115.0), 1.0, 2));
+
+        let before = world.player.pos;
+        world.update(1.0 / TICK_HZ as f32);
+
+        assert!(
+            (world.player.pos - before).length() < 2.0,
+            "remote bullet contact must not teleport the local player (before {before:?}, after {:?})",
+            world.player.pos
+        );
+        assert_eq!(world.current_coords, (0, 0));
+        assert!(
+            sent.0
+                .borrow()
+                .iter()
+                .all(|p| !matches!(p, GamePacket::PlayerDied { .. })),
+            "client must never send PlayerDied: {:?}",
+            sent.0.borrow()
+        );
+    }
+}

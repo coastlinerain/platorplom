@@ -110,6 +110,14 @@ mod tests {
         Level::new(grid, vec![vec![EntityType::Empty; 3]; 3])
     }
 
+    /// 4 rows × 4 cols, every tile `Empty` except `grid[3][1]` (the row *below*
+    /// the ray row used by G3).
+    fn wall_below_row_level() -> Level {
+        let mut grid = vec![vec![TileType::Empty; 4]; 4];
+        grid[3][1] = TileType::Wall;
+        Level::new(grid, vec![vec![EntityType::Empty; 4]; 4])
+    }
+
     #[test]
     fn solid_in_rect_overlaps_wall() {
         let level = wall_ring_level();
@@ -176,5 +184,55 @@ mod tests {
     fn colision_ignores_two_px_corner_inset() {
         let level = single_wall_cell_level();
         assert!(!level.colision(38.0, 30.0, 42.0, 60.0));
+    }
+
+    // --- solid_between tests (spec 2, authoritative player death) ---
+    //
+    // `solid_in_rect` is not usable for a 1-px-high ray: at `y = 119`
+    // (`TILE_SIZE = 40`) a 1-px rect spans rows 2 AND 3. `solid_between` scans
+    // only the single row containing the ray (G3 proves the regression).
+
+    #[test]
+    fn solid_between_wall_between_true() {
+        let level = wall_ring_level();
+        // Row 1: col 1 is Empty, col 2 is Wall (x ∈ [80, 120]).
+        assert!(level.solid_between(50.0, 110.0, 60.0));
+        // Order-insensitive: the caller may pass x1 < x0.
+        assert!(level.solid_between(110.0, 50.0, 60.0));
+    }
+
+    #[test]
+    fn solid_between_stops_before_wall_false() {
+        let level = wall_ring_level();
+        // Only col 1 is touched, and it is Empty.
+        assert!(!level.solid_between(45.0, 75.0, 60.0));
+    }
+
+    #[test]
+    fn solid_between_ignores_adjacent_row_wall() {
+        let level = wall_below_row_level();
+        // y = 119 → gy = 2, which is empty; the wall lives in row 3.
+        assert!(!level.solid_between(0.0, 80.0, 119.0));
+        // Regression proof: a 1-px rect at y = 119 spans rows 2 and 3, so
+        // `solid_in_rect` WOULD see grid[3][1] — hence solid_between exists.
+        assert!(level.solid_in_rect(Rect::new(0.0, 119.0, 80.0, 1.0)));
+    }
+
+    #[test]
+    fn solid_between_out_of_grid_row_not_solid() {
+        let level = wall_ring_level();
+        // gy < 0.
+        assert!(!level.solid_between(50.0, 110.0, -10.0));
+        // gy >= height (4 rows → y = 1000 is row 25).
+        assert!(!level.solid_between(50.0, 110.0, 1000.0));
+    }
+
+    #[test]
+    fn solid_between_out_of_grid_columns_not_solid() {
+        let level = single_wall_cell_level();
+        // Cols >= width (3) are ignored; col 2 at row 2 is Empty.
+        assert!(!level.solid_between(100.0, 400.0, 100.0));
+        // Negative cols are ignored; col 0 at row 2 is Empty.
+        assert!(!level.solid_between(-100.0, 10.0, 100.0));
     }
 }
