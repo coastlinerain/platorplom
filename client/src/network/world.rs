@@ -276,14 +276,15 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 );
             }
         }
-        GamePacket::Hit { entity_id } if Some(entity_id) == world.id => {
-            // Reset clock sync on own death
-            world.client_tick = 0;
-            world.server_tick_offset = 0;
-            world.clock_offset_ms = 0;
-            world.last_server_tick = 0;
-            world.last_server_time_ms = 0;
-            world.last_acked_server_tick = 0;
+        GamePacket::PlayerDied { id } if Some(id) == world.id => {
+            crate::world::lib::respawn_local(world);
+        }
+        GamePacket::PlayerDied { id } => {
+            // The server already respawned the victim; drop the stale body and
+            // interpolation so nothing is drawn at the death position. The next
+            // PlayerPos re-creates the Nemesis at the respawn point.
+            world.other_players.remove(&id);
+            world.other_interp.remove(&id);
         }
         _ => {}
     }

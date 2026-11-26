@@ -33,7 +33,7 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::PlayerInput { .. } => "PlayerInput",
         GamePacket::PlayerPos { .. } => "PlayerPos",
         GamePacket::Leave { .. } => "Leave",
-        GamePacket::Hit { .. } => "Hit",
+        GamePacket::PlayerDied { .. } => "PlayerDied",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
     }
 }
@@ -45,7 +45,7 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::PlayerInput { id, .. } => Some(*id),
         GamePacket::PlayerPos { id, .. } => Some(*id),
         GamePacket::Leave { id } => Some(*id),
-        GamePacket::Hit { entity_id } => Some(*entity_id),
+        GamePacket::PlayerDied { id } => Some(*id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
         _ => None,
     }
@@ -122,7 +122,7 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             "server_time_ms": server_time_ms,
         }),
         GamePacket::Leave { id } => serde_json::json!({ "id": id }),
-        GamePacket::Hit { entity_id } => serde_json::json!({ "entity_id": entity_id }),
+        GamePacket::PlayerDied { id } => serde_json::json!({ "id": id }),
         GamePacket::BulletSpawn {
             bullet_id,
             x,
@@ -180,7 +180,10 @@ mod tests {
             "PlayerPos"
         );
         assert_eq!(packet_type_name(&GamePacket::Leave { id: 1 }), "Leave");
-        assert_eq!(packet_type_name(&GamePacket::Hit { entity_id: 1 }), "Hit");
+        assert_eq!(
+            packet_type_name(&GamePacket::PlayerDied { id: 1 }),
+            "PlayerDied"
+        );
         assert_eq!(
             packet_type_name(&GamePacket::BulletSpawn {
                 bullet_id: 1,
@@ -229,7 +232,7 @@ mod tests {
             Some(7)
         );
         assert_eq!(packet_id(&GamePacket::Leave { id: 2 }), Some(2));
-        assert_eq!(packet_id(&GamePacket::Hit { entity_id: 9 }), Some(9));
+        assert_eq!(packet_id(&GamePacket::PlayerDied { id: 9 }), Some(9));
         assert_eq!(
             packet_id(&GamePacket::BulletSpawn {
                 bullet_id: 1,
@@ -367,7 +370,7 @@ mod tests {
             server_time_ms: 1234567890,
         });
         let _ = packet_key_fields(&GamePacket::Leave { id: 1 });
-        let _ = packet_key_fields(&GamePacket::Hit { entity_id: 1 });
+        let _ = packet_key_fields(&GamePacket::PlayerDied { id: 1 });
         let _ = packet_key_fields(&GamePacket::BulletSpawn {
             bullet_id: 1,
             x: 100.0,

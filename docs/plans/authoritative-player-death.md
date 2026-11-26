@@ -487,7 +487,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 5 — Client: drop self-report + client death collision, handle `PlayerDied`
 
-- [ ] done
+- [x] done
 - **Files**: `client/src/network/transport.rs`; `client/src/network/logging.rs`;
   `client/src/world/lib.rs`; `client/src/network/world.rs`;
   `client/src/world/game.rs`.
@@ -542,10 +542,20 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   nothing.
 - **Test**: C1–C3.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Removed the `Hit` reliability arms and log arms, deleted the
+    client-side death collision (`check_player_death`) and its `update` call,
+    renamed `handle_death` → `respawn_local` (no packet, rebuilds the player via
+    `Player::new`), and handled `PlayerDied` for self (local respawn) and remotes
+    (drop `Nemesis` + interpolation).
+  - Why: The client must never decide a death; it only mirrors the server's
+    authoritative respawn, which also removes the self-report attack surface.
+  - Rust concepts: exhaustive `match` arm replacement with a guard arm
+    (`if Some(id) == world.id`); `HashMap::remove` for remote cleanup; moving a
+    fresh `Player::new(id)` into `world.player`; module-path calls
+    (`crate::world::lib::respawn_local`).
+  - Watch out: `respawn_local` rebuilds the player **before** snapping
+    `prev_player_*`; duplicate `PlayerDied` is harmless; remote bullets stay
+    simulated but purely visual.
 
 ### Box 6 — E2E harness + PvP death e2e
 
