@@ -1,9 +1,7 @@
 use crate::camera::GameCamera;
 use crate::network::packet_io::PacketIO;
 use crate::render::Drawable;
-use crate::world::lib::{
-    check_level_transitions, check_player_death, update_remote_bullets_position,
-};
+use crate::world::lib::{check_level_transitions, update_remote_bullets_position};
 
 use crate::network::interpolation::RemoteInterp;
 use crate::network::prediction::InputRingBuffer;
@@ -148,10 +146,9 @@ impl World {
         // Increment client tick for clock synchronization (once per sim tick).
         self.client_tick = self.client_tick.wrapping_add(1);
 
-        // Run transition check AFTER remote-bullet collision so bullets
-        // can hit the local player on the frame they arrive.
+        // Remote bullets are purely visual now (death is server-authoritative);
+        // they are still simulated so they stop on walls.
         update_remote_bullets_position(self, dt);
-        check_player_death(self);
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
 
@@ -183,8 +180,8 @@ impl World {
             self.camera
                 .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
-        // Must run AFTER bullet collision so bullets can hit the player before
-        // load_current_level (called by check_level_transitions) clears them.
+        // Must run AFTER the bullet updates so a room transition
+        // (`load_current_level`) clears this frame's bullets.
         check_level_transitions(self);
         update_network(self);
 

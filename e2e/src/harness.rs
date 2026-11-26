@@ -5,7 +5,7 @@ use metroidvania_rust::network::prediction;
 use metroidvania_rust::network::world::handle_packet;
 use metroidvania_rust::world::game::World;
 use metroidvania_rust::world::lib::check_level_transitions;
-use metroidvania_server::ServerWorld;
+use metroidvania_server::{PlayerHitInfo, ServerWorld};
 use protocol::GamePacket;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -72,6 +72,10 @@ pub struct TestHarness {
     pub next_handle: u8,
     pub next_player_id: u8,
     pub last_shots: Vec<(u8, f32)>,
+    pub last_deaths: Vec<PlayerHitInfo>,
+    /// Number of client→server `PlayerDied` packets observed. Must stay 0:
+    /// death is server-authoritative.
+    pub client_death_reports: usize,
     pub last_broadcasts: Vec<(ClientHandle, u8, f32, f32)>,
     pub last_actions: Vec<(ClientHandle, String, f32)>,
     /// Cumulative shot count per player (incremented each tick from
@@ -91,6 +95,8 @@ impl TestHarness {
             next_handle: 0,
             next_player_id: 1,
             last_shots: Vec::new(),
+            last_deaths: Vec::new(),
+            client_death_reports: 0,
             last_broadcasts: Vec::new(),
             last_actions: Vec::new(),
             total_shots: std::collections::HashMap::new(),
@@ -150,6 +156,7 @@ impl TestHarness {
 
     pub fn tick(&mut self) {
         let tick_dt = 1.0 / TICK_HZ as f32;
+        self.last_deaths.clear();
 
         // Step 1: Apply queued inputs.
         for client in &mut self.clients {
@@ -204,40 +211,60 @@ impl TestHarness {
         // Step 3: Drain client→server channels, feed server.apply_input.
         for rx in &self.from_clients {
             while let Ok(bytes) = rx.try_recv() {
-                if let Ok(GamePacket::PlayerInput {
-                    id,
-                    level_x,
-                    level_y,
-                    move_left,
-                    move_right,
-                    jump,
-                    shoot,
-                    seq,
-                }) = postcard::from_bytes::<GamePacket>(&bytes)
-                {
-                    self.server.apply_input(
+                match postcard::from_bytes::<GamePacket>(&bytes) {
+                    Ok(GamePacket::PlayerInput {
                         id,
                         level_x,
                         level_y,
-                        PlayerInput {
-                            move_left,
-                            move_right,
-                            jump,
-                            shoot,
-                        },
+                        move_left,
+                        move_right,
+                        jump,
+                        shoot,
                         seq,
-                    );
+                    }) => {
+                        self.server.apply_input(
+                            id,
+                            level_x,
+                            level_y,
+                            PlayerInput {
+                                move_left,
+                                move_right,
+                                jump,
+                                shoot,
+                            },
+                            seq,
+                        );
+                    }
+                    Ok(GamePacket::PlayerDied { .. }) => {
+                        // Must stay 0: death is server-authoritative.
+                        self.client_death_reports += 1;
+                    }
+                    _ => {}
                 }
             }
         }
 
         // Step 4: Server update.
-        let shots = self.server.update(tick_dt);
+        let (shots, deaths) = self.server.update(tick_dt);
         // Accumulate shot counts (server never stores Bullet objects — D6).
         self.last_shots.clear();
         for shot in &shots {
             *self.total_shots.entry(shot.owner_id).or_insert(0) += 1;
             self.last_shots.push((shot.owner_id, shot.dir));
+        }
+        self.last_deaths.extend(deaths.iter().copied());
+
+        // Step 4b: Broadcast PlayerDied to ALL clients (mirrors the server's
+        // mandated tick order: update → PlayerDied → PlayerPos → BulletSpawn).
+        // This must precede Step 5/6: the victim's `respawn_local` clears
+        // `remote_bullets` via `load_current_level`, so the same tick's
+        // BulletSpawn has to arrive afterwards (pinned by bullet_spawn.rs).
+        for hit in &self.last_deaths {
+            let packet = GamePacket::PlayerDied { id: hit.victim_id };
+            let bytes = postcard::to_allocvec(&packet).expect("serialize PlayerDied");
+            for tx in &self.to_clients {
+                let _ = tx.send(bytes.clone());
+            }
         }
 
         // Step 5: Broadcast PlayerPos to ALL clients.
@@ -387,6 +414,15 @@ impl TestHarness {
         if let Some(player) = self.server.players_mut().get_mut(&player_id) {
             player.pos = glam::Vec2::new(x, y);
         }
+    }
+
+    /// Force the server-side room coords (client-claimed coords are overwritten
+    /// every tick by `PlayerInput`, so this makes the fixture explicit and is
+    /// the seam spec 3 will replace with room authority).
+    pub fn set_server_player_coords(&mut self, handle: ClientHandle, x: u8, y: u8) {
+        let player_id = self.player_id_for(handle);
+        self.server
+            .apply_input(player_id, x, y, PlayerInput::default(), 0);
     }
 
     pub fn set_server_player_grounded(&mut self, handle: ClientHandle, grounded: bool) {

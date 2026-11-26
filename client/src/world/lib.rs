@@ -1,5 +1,5 @@
 use crate::world::game::World;
-use protocol::GamePacket;
+use game::entities::player::Player;
 
 pub fn update_remote_bullets_position(world: &mut World, dt: f32) {
     let current_room = world.current_coords;
@@ -14,29 +14,15 @@ pub fn update_remote_bullets_position(world: &mut World, dt: f32) {
         }
     });
 }
-pub fn check_player_death(world: &mut World) {
-    let mut died = false;
-
-    for bullet in &mut world.remote_bullets {
-        if bullet.active && bullet.check_collision(&world.player) {
-            bullet.active = false;
-            died = true;
-            break;
-        }
-    }
-
-    if died {
-        handle_death(world);
-    }
-}
-fn handle_death(world: &mut World) {
-    if let Some(my_id) = world.id {
-        world.network.send(GamePacket::Hit { entity_id: my_id });
-    }
-
+/// Applies a server-authoritative respawn (`PlayerDied` naming our own id).
+/// Rebuilds the local player from the canonical spawn so the next `PlayerPos`
+/// reconciles cleanly; never sends a packet.
+pub fn respawn_local(world: &mut World) {
     println!("You died! Returning to start...");
     world.current_coords = (0, 0);
-    world.player.pos = glam::Vec2::new(100.0, 100.0);
+    // Match the server's `Player::new` respawn exactly (pos/vel/grounded/dir).
+    let id = world.player.id;
+    world.player = Player::new(id);
     // Snap the interpolation source to the respawn position so the next
     // `draw(alpha)` renders at the spawn point instead of lerping from a
     // stale pre-death position (defensive — the prev-state store in

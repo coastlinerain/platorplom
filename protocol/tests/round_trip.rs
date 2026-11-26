@@ -62,9 +62,9 @@ fn round_trip_leave() {
 }
 
 #[test]
-fn round_trip_hit() {
-    round_trip(GamePacket::Hit { entity_id: 0 });
-    round_trip(GamePacket::Hit { entity_id: 255 });
+fn round_trip_player_died() {
+    round_trip(GamePacket::PlayerDied { id: 0 });
+    round_trip(GamePacket::PlayerDied { id: 255 });
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-26 (remove-pve-enemies refactor COMPLETE — PvE Enemy machinery removed end-to-end + enemy_bullets→remote_bullets rename; 178 tests green; subagents pinned to flash + CI token-optimization)
+> Last updated: 2026-11-26 (authoritative-player-death COMPLETE — server-authoritative PvP raycast + PlayerDied; 198 tests green; ADR-0003; spec 2 of netcode-hardening roadmap)
 
 ## Current status
 
@@ -105,17 +105,39 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] Code review APPROVE-WITH-MINOR (5 doc/process MINORs fixed)
 - [x] 178 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
 
+## Authoritative player death checklist — feature (`feat/authoritative-player-death`)
+- [x] Spec written (`docs/specs/authoritative-player-death.md`)
+- [x] Plan review passed (SEND-BACK → MAJOR harness order + 5 MINOR fixed)
+- [x] 21 RED tests written by tester (`d857f39`)
+- [x] Boxes 1–6 implemented (protocol rename, solid_between, raycast/respawn, broadcast, client respawn, e2e)
+- [x] Code review APPROVE-WITH-MINOR; QA done (2 MAJOR + minors, all follow-ups)
+- [x] 198 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
+- [x] ADR-0003 accepted
+
 ## Next actions (top = do first)
 
-1. **Push/PR (owner merges)** — remove-pve-enemies (spec 1) is complete (178 tests
-   green). Push `refactor/remove-pve-enemies` + open PR to `dev`; owner merges.
-   NOTE: the branch also carries two unrelated config commits (`64470e5` agent
-   model pin, `00215d2` CI token config) — decide whether to keep them in this PR
-   or split them onto their own branch first.
-2. **Spec 2 — `feat/authoritative-player-death`** (next, top priority) — re-add
-   server-authoritative PvP hit detection (raycast vs players, `PlayerDied`).
-   Shooting is inert until this lands.
-3. **Phase 2h follow-ups (deferred)**:
+1. **Merge spec 1 → dev, then rebase spec 2** — `feat/authoritative-player-death`
+   is stacked on `refactor/remove-pve-enemies` (PR #8, not yet in `dev`). Merge
+   PR #8 first, then `git rebase --onto dev refactor/remove-pve-enemies
+   feat/authoritative-player-death`, then open PR #9. (QA min-6; owner decides
+   merge-first vs stacked-PR.)
+2. **Spec 3 — `feat/authoritative-room-membership`** (next, top priority) —
+   door-aware `RequestRoomChange`, drop `PlayerInput.level_x/level_y`. QA added a
+   victim-side `coords`-spoof acceptance criterion (a cheater can dodge death by
+   claiming an empty room). See roadmap spec 3.
+3. **Spec 2 QA follow-ups (deferred, record for owner)**:
+   - Spawn-kill loop: global `(0,0)` spawn + no i-frames + 83ms cooldown lets an
+     attacker kill a respawning player repeatedly. Cheapest fix: `invuln_until_tick`
+     map in `raycast_player`; real fix is room-local/checkpoint spawns.
+   - `dir.signum()` normalization in `raycast_player` (the "only the sign matters"
+     invariant is implicit while `|dir| == 1.0`).
+   - `PlayerDied` drops the victim's in-flight bullets on every observer (remote
+     `Nemesis` removal detaches bullet ownership); decouple bullet retention from
+     `Nemesis` presence, or accept + comment.
+   - Respawn-tick phantom-hit window: the victim's already-in-flight `PlayerInput`
+     re-claims the old room for 1–2 ticks; ignore `coords` writes on the respawn
+     tick (or document in `respawn`).
+4. **Phase 2h follow-ups (deferred)**:
    - M2 — laminar poller thread + UDP socket leak on Leave/Retry/quit (needs a
      transport `Drop` that drains-then-stops + joins, plus a real-socket check).
    - `.expect()` restructure in `App::enter_playing_from_join` (pass `assigned_id`
@@ -125,16 +147,16 @@ Working memory for the project. **Update this at the end of every task.**
      clock-reset if wanted.
    - Paused-screen remote-animation wording (remote snapshots keep updating while
      paused; "rendering stays frozen" is slightly imprecise).
-4. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
+5. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
    render position (QA m5); (c) snap `prev_player_*` after reconciliation (QA n3).
-5. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
-6. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+6. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
+7. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English.
-7. **Follow-up: netcode smoothness review** — owner wants a seamless online
+8. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
-8. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
+9. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
    - Collapse `RealPacketIO`/`HeadlessPacketIO` (now byte-identical in
      `transport.rs`; decide whether the transport-level `headless` bool survives).
    - Convert `.unwrap()` in lib code (`transport.rs` bind/`to_allocvec`,
@@ -247,3 +269,16 @@ Working memory for the project. **Update this at the end of every task.**
   from auto-load; pre-commit quiet on success + skips `cargo test` on docs-only
   commits. Commits `64470e5` + `00215d2` live on the remove-pve-enemies branch —
   branch-scope decision pending (Next actions #1).
+- (authoritative-player-death complete) Spec 2 landed on `feat/authoritative-player-death`
+  (7 commits, 6 boxes + fmt). Server is now the sole authority on PvP death:
+  `Hit` → `PlayerDied`, `raycast_player` (horizontal, same-room, self-excluded,
+  wall-occluded via `Level::solid_between`, closest-hit-wins), `respawn` to the
+  global `(0,0)`/`(100,100)` spawn, `update -> (Vec<BulletSpawnInfo>,
+  Vec<PlayerHitInfo>)`, impact-x `BulletSpawn`, and client respawns only on
+  `PlayerDied` (no self-report). 21 tests (1 protocol + 5 solid_between + 10
+  server + 3 client + 2 e2e); 198 passed / 3 ignored; fmt + clippy clean; grep
+  clean. Code review APPROVE-WITH-MINOR; QA found 2 MAJOR (spawn-kill loop; victim
+  `coords`-spoof cheat) — both recorded as follow-ups, not blockers. ADR-0003
+  accepted (hitscan, impact-x bullet, global respawn, ignored inbound, no room
+  filter). Branch is stacked on `refactor/remove-pve-enemies` (PR #8) — merge order
+  pending (Next actions #1).

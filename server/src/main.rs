@@ -38,7 +38,7 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::PlayerInput { .. } => "PlayerInput",
         GamePacket::PlayerPos { .. } => "PlayerPos",
         GamePacket::Leave { .. } => "Leave",
-        GamePacket::Hit { .. } => "Hit",
+        GamePacket::PlayerDied { .. } => "PlayerDied",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
     }
 }
@@ -49,7 +49,7 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::PlayerInput { id, .. } => Some(*id),
         GamePacket::PlayerPos { id, .. } => Some(*id),
         GamePacket::Leave { id } => Some(*id),
-        GamePacket::Hit { entity_id } => Some(*entity_id),
+        GamePacket::PlayerDied { id } => Some(*id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
         _ => None,
     }
@@ -120,7 +120,7 @@ fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
             "server_time_ms": server_time_ms,
         }),
         GamePacket::Leave { id } => json!({ "id": id }),
-        GamePacket::Hit { entity_id } => json!({ "entity_id": entity_id }),
+        GamePacket::PlayerDied { id } => json!({ "id": id }),
         GamePacket::BulletSpawn {
             bullet_id,
             x,
@@ -221,22 +221,10 @@ fn main() {
                                 world.remove(id);
                                 broadcast_leave(&addrs, &packet_sender, id);
                             }
-                            GamePacket::Hit { entity_id: id } => {
-                                println!("Player {} died", id);
-
-                                for (&player_addr, &player_id) in addrs.iter() {
-                                    if player_id != id {
-                                        let hit_packet = GamePacket::Hit { entity_id: id };
-                                        let bytes = postcard::to_allocvec(&hit_packet).unwrap();
-                                        log_packet("sent", &hit_packet);
-                                        let _ = packet_sender.send(Packet::reliable_ordered(
-                                            player_addr,
-                                            bytes,
-                                            None,
-                                        ));
-                                    }
-                                }
-                            }
+                            // Server→client only: a client must never report a
+                            // death. Ignore it (defense in depth: no state
+                            // change, no broadcast).
+                            GamePacket::PlayerDied { .. } => {}
                             // Client-sent PlayerPos is no longer accepted — the server is authoritative.
                             GamePacket::PlayerPos { .. } => {}
                             _ => {}
@@ -267,7 +255,24 @@ fn main() {
         //   and the tick rate simply degrades rather than spiraling.
         let now = Instant::now();
         while now >= next_tick {
-            let shots = world.update(tick_dt);
+            let (shots, deaths) = world.update(tick_dt);
+
+            // Broadcast one PlayerDied per kill to EVERY connected address
+            // (including the victim), before PlayerPos/BulletSpawn so the
+            // respawned position reaches clients in the same tick.
+            for hit in &deaths {
+                let packet = GamePacket::PlayerDied { id: hit.victim_id };
+                let bytes = postcard::to_allocvec(&packet).unwrap();
+                println!("Player {} was killed by {}", hit.victim_id, hit.shooter_id);
+                log_packet("sent", &packet);
+                for &dest_addr in addrs.keys() {
+                    let _ = packet_sender.send(Packet::reliable_ordered(
+                        dest_addr,
+                        bytes.clone(),
+                        None,
+                    ));
+                }
+            }
 
             // Broadcast authoritative PlayerPos from EVERY player to EVERY
             // connected address (nested loop: dest × players). The own-player

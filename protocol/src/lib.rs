@@ -19,8 +19,8 @@ pub enum GamePacket {
     Leave {
         id: u8,
     },
-    Hit {
-        entity_id: u8,
+    PlayerDied {
+        id: u8,
     },
     PlayerInput {
         id: u8,

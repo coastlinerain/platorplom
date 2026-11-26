@@ -8,7 +8,7 @@ Modular, limited specs. Each is its own branch + `docs/specs/<name>.md` +
 `docs/plans/<name>.md`, independently shippable, ordered so each leaves the game in a
 working state.
 
-## 1. `refactor/remove-pve-enemies` — *current*
+## 1. `refactor/remove-pve-enemies` — done (PR #8)
 
 Strip the PvE `Enemy` machinery end-to-end and rename `enemy_bullets` → `remote_bullets`.
 
@@ -20,15 +20,21 @@ Strip the PvE `Enemy` machinery end-to-end and rename `enemy_bullets` → `remot
 
 *Result: PvP movement-only; shooting becomes inert (no targets) until spec 2.*
 
-## 2. `feat/authoritative-player-death`
+## 2. `feat/authoritative-player-death` — done (implemented, 198 tests)
 
 Server-authoritative PvP combat: `raycast_player` + wall occlusion, `PlayerHitInfo`, rename
 `Hit` → `PlayerDied`, server-originated death, client respawns only on server death.
 
-## 3. `feat/authoritative-room-membership`
+## 3. `feat/authoritative-room-membership` — *current* (next)
 
 `RequestRoomChange` + door-aware `can_enter`/`apply_room_change`, drop
 `PlayerInput.level_x/level_y`, client snap-back on rejection.
+
+*QA (spec 2) adds an acceptance criterion:* a modified client can currently dodge
+death by claiming a room where nobody else is (victim-side `coords` claim) — and
+the respawn's `coords = (0,0)` is overwritten by the next inbound `PlayerInput`.
+Spec 3 must make room membership authoritative for **both** shooter and victim,
+so an attacker cannot become unkillable by spoofing their room.
 
 ## 4. `fix/reconciliation-replay-dt`
 

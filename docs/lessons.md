@@ -406,9 +406,9 @@ Running journal of Rust concepts encountered while building Rustvania.
 
 ### Clock sync reset triggers (Join, Hit, Room Transition, F11) (2026-11-25)
 
-- **Where**: `client/src/network/world.rs` (JoinResponse, Hit), `client/src/world/lib.rs` (`load_current_level`), `client/src/world/game.rs` (`update` F11).
-- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `Hit` for own player (death/respawn teleport), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset — removed in Phase 2h when `main.rs` was rewritten as a thin loop; the remaining triggers are JoinResponse, Hit, and room transition).
-- **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. `Hit` handling is now in both `handle_packet` (server-broadcast death) AND `handle_death` (client-initiated death) — keep both in sync.
+- **Where**: `client/src/network/world.rs` (JoinResponse, `PlayerDied`), `client/src/world/lib.rs` (`load_current_level` / `respawn_local`), `client/src/world/game.rs` (`update` F11 — removed in Phase 2h).
+- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `PlayerDied` for own player (death/respawn teleport — server-authoritative since spec 2), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset — removed in Phase 2h when `main.rs` was rewritten as a thin loop; the remaining triggers are JoinResponse, PlayerDied, and room transition).
+- **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. Since spec 2, death is server-authoritative only — the client respawns on receiving `PlayerDied` for its own id via `respawn_local`; there is no client-initiated death path to keep in sync.
 
 ### Phase 2f: Netcode Synchronization & Frame Alignment (2026-11-25)
 
@@ -576,3 +576,23 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `server/src/world.rs` (`ServerWorld::update`), callers in `server/src/main.rs`, `e2e/src/harness.rs`, and 6 `#[test]` sites.
 - **What it is**: `update` went from `-> (Vec<BulletSpawnInfo>, Vec<EnemyDiedInfo>)` to `-> Vec<BulletSpawnInfo>`. Every `let (shots, deaths) = world.update(...)` destructuring is now a type error, so the compiler enumerates every consumer that must change — including the `mod tests` block and the *second*, top-level `#[test]` region the editor might miss by eye.
 - **Gotcha / insight**: a signature change is a cheap, precise "find all callers". Prefer it over grep when the thing you're removing flows through a return value — the type system won't let you forget a call site.
+
+## feat: authoritative player death (2026-11-26)
+
+### `sort_by_key` turns HashMap iteration order into a deterministic result (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`update` second pass, `raycast_player`).
+- **What it is**: `self.players` is a `HashMap`, whose iteration order is unspecified (random per process, keyed by the random `RandomState`). Bullet-id assignment and multi-victim "closest hit" resolution would therefore be nondeterministic across runs. Sorting `shoot_requests` by `player_id` (and iterating victims in ascending `id`) before the second pass makes both bullet ids and the hit-selection deterministic — reproducible in tests and identical across two servers.
+- **Gotcha / insight**: determinism is not a HashMap property; it is a property you *add* with an explicit `sort_by_key` (or `BTreeMap`) at the point of consumption. Closest-hit-wins uses a strict `<` on `distance` while iterating ascending ids, so an exact distance tie resolves to the lower id without an extra sort.
+
+### `&self` raycast, then `&mut self` respawn — the borrow split in one tick (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`update` second pass → `raycast_player` / `respawn`).
+- **What it is**: the hit-detection pass reads every player's position through `&self` (`raycast_player` takes `&self` and returns `Option<(u8, f32)>`), collecting victims into a `Vec`. Only *after* the read-only loop does the method mutate (`respawn(&mut self, id)`), so the immutable borrows end before the mutable one begins. A single `update` call is split into a pure read phase and a write phase precisely so Rust's borrow checker can prove there is no aliasing.
+- **Gotcha / insight**: this is the canonical "collect-then-mutate" pattern for iterating a collection while deleting/resetting from it. If `respawn` were called inside the loop, the `&self` borrow from the raycast (or the iteration over `self.players`) would conflict with `&mut self` — the compiler forces the ordering, which also happens to be the *correct* ordering (a victim can't be teleported mid-pass and hit twice in one tick).
+
+### `dir.signum()` vs "only the sign matters" — an implicit invariant (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`raycast_player`).
+- **What it is**: the ray math is `d_near = (near_edge - spawn_x) * dir` and `hit_x = spawn_x + dir * distance`. The spec says "only the sign of `dir` matters", which is true only while `dir ∈ {−1.0, 1.0}`. Today `Player.dir` is ±1.0, so it holds; but the invariant is implicit, and a `dir` with `|dir| ≠ 1` would silently scale both the hit point and the closest-hit ordering.
+- **Gotcha / insight**: when a function's contract is "only the sign matters", make the code say so — normalize `let dir = dir.signum()` at the top — rather than trusting the caller. This is the flagged (MINOR) hardening from QA; the lesson is to encode the invariant instead of documenting it.
