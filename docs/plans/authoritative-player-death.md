@@ -281,7 +281,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 1 — Protocol rename `Hit` → `PlayerDied`
 
-- [ ] done
+- [x] done
 - **Files**: `protocol/src/lib.rs`; `protocol/tests/round_trip.rs`.
 - **Change**:
   - `protocol/src/lib.rs`: replace the `Hit { entity_id: u8 }` variant **in
@@ -298,10 +298,18 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   through Box 6) — do not "fix" it in this box.
 - **Test**: P1.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Replaced the `Hit { entity_id: u8 }` enum variant with
+    `PlayerDied { id: u8 }` in the same enum slot; the tester's `round_trip_player_died`
+    test already covers it.
+  - Why: Spec 2 makes death server-authoritative; the packet is now a
+    server→client notification, not a client self-report, so its name and field
+    reflect the new meaning.
+  - Rust concepts: enum variant rename (the payload stays one `u8`); deriving
+    `Serialize`/`Deserialize` and `PartialEq` continues to make postcard
+    round-trips comparable with `assert_eq!`.
+  - Watch out: this rename intentionally breaks compilation in the server binary
+    and client crate until Boxes 4–5; only `cargo test -p protocol` is expected
+    to pass now.
 
 ### Box 2 — `Level::solid_between` + unit tests
 
