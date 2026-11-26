@@ -1,6 +1,7 @@
 # Authoritative player death — Implementation Plan
 
-- Status: draft
+- Status: implemented (2026-11-26; 198 tests pass under `cargo test --workspace`,
+  3 ignored; includes all 21 named tests)
 - Spec: `docs/specs/authoritative-player-death.md`
 - Date: 2026-11-26
 - Branch: `feat/authoritative-player-death`
@@ -559,7 +560,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 6 — E2E harness + PvP death e2e
 
-- [ ] done
+- [x] done
 - **Files**: `e2e/src/harness.rs`; create `e2e/tests/authoritative_death.rs`.
 - **Change**:
   - `e2e/src/harness.rs`:
@@ -606,18 +607,27 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   `cargo clippy --all-targets --all-features --workspace -- -D warnings`.
 - **Test**: E1–E2 (plus `bullet_spawn`, which pins the Step 4b ordering).
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Rippled the `update` tuple through the harness, added `last_deaths`
+    and `client_death_reports`, fanned `PlayerDied` out in a new Step 4b before
+    `PlayerPos`/`BulletSpawn`, added `set_server_player_coords`, and kept the
+    tester's `authoritative_death.rs` cases green.
+  - Why: The in-process harness must mirror the real server's tick order and
+    authority, including counting any (currently zero) client death reports.
+  - Rust concepts: tuple destructuring; `Vec::extend(iter.copied())` for
+    `Copy` elements; disjoint-field borrows while iterating `&self.from_clients`
+    and mutating `self.server`/`self.client_death_reports`; sharing serialized
+    bytes across channels with `clone()`.
+  - Watch out: Step 4b must precede `PlayerPos`/`BulletSpawn` or
+    `bullet_spawn.rs::test_e2e_bulletspawn_both_clients` breaks; `last_deaths`
+    is cleared every tick, so readers must break on the same tick as the death.
 
 ## Definition of done
 
-- [ ] `cargo test --workspace` passes (21 named tests above present; ~20 net new
+- [x] `cargo test --workspace` passes (21 named tests above present; ~20 net new
       test functions).
-- [ ] `cargo fmt --check --all` clean.
-- [ ] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean.
-- [ ] Grep-clean over code only (historical `docs/` hits are fine):
+- [x] `cargo fmt --check --all` clean.
+- [x] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean.
+- [x] Grep-clean over code only (historical `docs/` hits are fine):
 
   ```bash
   grep -RIn 'GamePacket::Hit\|round_trip_hit\|entity_id\|check_player_death\|handle_death' \
@@ -625,12 +635,12 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   # → no output
   ```
 
-- [ ] No `Hit` variant remains; every other `GamePacket` variant is byte-identical.
-- [ ] `cargo test -p e2e` proves the pre-existing suites still pass. Only the
+- [x] No `Hit` variant remains; every other `GamePacket` variant is byte-identical.
+- [x] `cargo test -p e2e` proves the pre-existing suites still pass. Only the
       `update` tuple ripple and the log renames touch shared code; additionally
       `bullet_spawn.rs::test_e2e_bulletspawn_both_clients` depends on the new
       PlayerDied-before-BulletSpawn harness ordering (Step 4b).
-- [ ] `PlayerInput.level_x/level_y` and client-claimed `coords` are still present
+- [x] `PlayerInput.level_x/level_y` and client-claimed `coords` are still present
       (spec 3 owns them).
 - [ ] Process: update `docs/progress.md` (status + next actions: spec 3 is next),
       add `docs/lessons.md` entries for `sort_by_key` as the determinism fix for
