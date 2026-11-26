@@ -263,10 +263,7 @@ fn main() {
             for hit in &deaths {
                 let packet = GamePacket::PlayerDied { id: hit.victim_id };
                 let bytes = postcard::to_allocvec(&packet).unwrap();
-                println!(
-                    "Player {} was killed by {}",
-                    hit.victim_id, hit.shooter_id
-                );
+                println!("Player {} was killed by {}", hit.victim_id, hit.shooter_id);
                 log_packet("sent", &packet);
                 for &dest_addr in addrs.keys() {
                     let _ = packet_sender.send(Packet::reliable_ordered(
