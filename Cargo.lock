@@ -193,6 +193,7 @@ name = "game"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "serde",
 ]
 
 [[package]]
@@ -480,6 +481,7 @@ dependencies = [
 name = "protocol"
 version = "0.1.0"
 dependencies = [
+ "game",
  "postcard",
  "serde",
 ]

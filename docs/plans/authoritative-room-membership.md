@@ -614,7 +614,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 3 — `server` world: validation, teleport, cooldown
 
-- [ ] done
+- [x] done
 - **Files**: `server/src/world.rs`; `server/src/lib.rs`.
 - **Change**:
   - Imports: `use game::rect::Rect; use game::room_graph::{Direction, RoomCoords, RoomGraph};`
@@ -650,15 +650,37 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   The **binary** still fails (it calls the old `apply_input`) — Box 4 fixes it.
 - **Test**: S1–S13.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: `HashMap::values_mut` + `saturating_sub`,
-    `Option<RoomChangeInfo>` as a two-outcome result instead of a `Result`,
-    `let-else` for the invariant door, splitting `&self` (level/rect reads) from
-    `&mut self` (teleport), field-wise assignment instead of `Vec2` arithmetic)_
-  - Watch out: _(rejections must not mutate anything; acceptance must arm the
-    cooldown; grounded must be recomputed in the target room; `pending` must be
-    preserved, unlike `respawn`)_
+  - What: `ServerWorld` now owns `room_graph` and a per-player
+    `room_change_cooldown`; `apply_input` lost `x, y` and no longer writes
+    `coords`; added `apply_room_change`, `force_teleport`, a private
+    `level(room)` fallback helper, and `RoomChangeInfo` (exported from
+    `server/src/lib.rs`); cooldowns are initialised in `spawn`, dropped in
+    `remove`, and decremented at the top of `update`.
+  - Why: this is the authority boundary. `coords` changes only through
+    server-controlled paths, so `raycast_player` can trust both the shooter's
+    and the victim's room. A request is accepted only when a door exists for
+    `(from, direction)` and the authoritative body overlaps its lead-expanded
+    trigger, and only outside the cooldown; acceptance teleports to the
+    canonical entry, rejection returns the unchanged state for a client snap
+    back. `force_teleport` exists so join/respawn/test setup never has to pass
+    door validation.
+  - Rust concepts: `HashMap::values_mut()` iterates all cooldown entries for the
+    per-tick decrement, and `u8::saturating_sub` makes "already zero" free of
+    underflow; `Option<RoomChangeInfo>` is deliberately a two-outcome reply
+    (unknown player vs. accept/reject) instead of a `Result`, because a
+    rejection is a normal protocol event, not an error; `let ... else` handles
+    the invariant door without `unwrap`; the `&mut self` teleport is split from
+    the `&self` `level`/`can_enter` reads by copying `(rect, w, h)` out first,
+    then recomputing `grounded` before the mutable player borrow; `player.pos.x
+    = …` / `player.vel.y = 0.0` field-wise assignment keeps `glam` a
+    dev-dependency only.
+  - Watch out: a rejection must mutate nothing (coords, pos, velocity);
+    acceptance arms the cooldown (only acceptance); `grounded` is recomputed in
+    the **target** room at the entry, or a stale airborne jump flag leaks into
+    the new room; `pending`, `bullets`, `dir`, `shoot_cooldown`, and `max_seq`
+    are preserved — unlike `respawn`, which resets the input; `apply_input`'s
+    `max_seq` accumulation stays wrapping-aware; `force_teleport` no-ops for an
+    unspawned id rather than inserting a phantom coord.
 
 ### Box 4 — `server/src/main.rs`: request handling + logging
 
