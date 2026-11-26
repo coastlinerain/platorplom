@@ -35,6 +35,19 @@ pub const CONNECT_TIMEOUT_MS: u64 = 5000;
 /// Disconnect watchdog: fire `ConnectionLost` if no `PlayerPos` for this long.
 pub const DISCONNECT_TIMEOUT_MS: u64 = 1000;
 
+/// Server: minimum ticks between accepted room changes for one player.
+/// ~200 ms at 60 Hz. Tunable if door ping-pong becomes a real problem.
+pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 12;
+
+/// Client: ticks to wait after a rejected request before retrying.
+pub const ROOM_CHANGE_RETRY_TICKS: u8 = 6;
+
+/// Server-side only: extra px added to a door's geometric trigger on the
+/// approach edge before `can_enter` validates. Covers one prediction tick
+/// (~VELOCIDAD / TICK_HZ ≈ 6.667 px) with margin. The client's `door_at`
+/// detection does not use this.
+pub const DOOR_LEAD_TOLERANCE_PX: f32 = 8.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;

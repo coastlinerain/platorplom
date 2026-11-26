@@ -1,10 +1,176 @@
 // Spec 3 — authoritative room membership.
 //
-// RED batch (test-first): this file intentionally contains only the tester's
-// `#[cfg(test)] mod tests` block. The `RoomGraph` / `Door` / `Direction` /
-// `RoomCoords` production items are added by the implementer in Box 1, so
-// `cargo test -p game` currently fails to compile (unresolved `super::*`
-// imports) exactly as the plan expects.
+// Shared, rendering- and network-free door model. Both the server (validation
+// against `Door::server_trigger`) and the client (detection against the raw
+// `Door::trigger`) derive "is the player at this door" from this data.
+
+use crate::rect::Rect;
+
+/// Room coordinates in the same convention as the server's `coords` and the
+/// `PlayerPos` packet: `(level_x, level_y) = (column, row)`.
+pub type RoomCoords = (u8, u8);
+
+/// Which edge of a room a door sits on.
+///
+/// The variant order is part of the wire format: postcard encodes the variant
+/// index. Do not reorder after release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Direction {
+    /// Variant index 0.
+    North,
+    /// Variant index 1.
+    South,
+    /// Variant index 2.
+    East,
+    /// Variant index 3.
+    West,
+}
+
+/// A directed edge from one room edge to the adjacent room.
+///
+/// Bidirectional openings are represented by two doors (A→B East and B→A
+/// West), each with its own trigger band and canonical entry position.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Door {
+    /// Source room.
+    pub from: RoomCoords,
+    /// Edge of `from` the door sits on.
+    pub direction: Direction,
+    /// Room entered when the door is used.
+    pub target: RoomCoords,
+    /// Geometric band used by the client's `door_at` detection.
+    pub trigger: Rect,
+    /// Canonical player top-left position inside `target` after the teleport.
+    pub entry: (f32, f32),
+}
+
+impl Door {
+    /// Server-side validation rect: the geometric `trigger` grown by
+    /// `DOOR_LEAD_TOLERANCE_PX` on the approach edge (East: left, West: right,
+    /// South: top, North: bottom), so a request issued on the predicted-first
+    /// client tick still validates against the slightly-behind authoritative
+    /// position. The client's `door_at` uses the raw `trigger`, never this.
+    pub fn server_trigger(&self) -> Rect {
+        let tol = crate::config::DOOR_LEAD_TOLERANCE_PX;
+        let t = self.trigger;
+        match self.direction {
+            Direction::East => Rect::new(t.x - tol, t.y, t.w + tol, t.h),
+            Direction::West => Rect::new(t.x, t.y, t.w + tol, t.h),
+            Direction::South => Rect::new(t.x, t.y - tol, t.w, t.h + tol),
+            Direction::North => Rect::new(t.x, t.y, t.w, t.h + tol),
+        }
+    }
+}
+
+/// The complete door graph of the current 2×2 map, in table order.
+#[derive(Debug, Clone)]
+pub struct RoomGraph {
+    doors: Vec<Door>,
+}
+
+impl RoomGraph {
+    /// Builds the eight directed doors of the current map.
+    ///
+    /// Table order is load-bearing for `door_at` tie-breaking, though the
+    /// current map has no overlapping triggers.
+    pub fn new() -> Self {
+        Self {
+            doors: vec![
+                Door {
+                    from: (0, 0),
+                    direction: Direction::East,
+                    target: (1, 0),
+                    trigger: Rect::new(760.0, 320.0, 40.0, 40.0),
+                    entry: (10.0, 321.0),
+                },
+                Door {
+                    from: (1, 0),
+                    direction: Direction::West,
+                    target: (0, 0),
+                    trigger: Rect::new(0.0, 320.0, 40.0, 40.0),
+                    entry: (760.0, 321.0),
+                },
+                Door {
+                    from: (0, 0),
+                    direction: Direction::South,
+                    target: (0, 1),
+                    trigger: Rect::new(280.0, 440.0, 80.0, 40.0),
+                    entry: (305.0, 10.0),
+                },
+                Door {
+                    from: (0, 1),
+                    direction: Direction::North,
+                    target: (0, 0),
+                    trigger: Rect::new(280.0, 0.0, 80.0, 40.0),
+                    entry: (305.0, 432.0),
+                },
+                Door {
+                    from: (1, 0),
+                    direction: Direction::South,
+                    target: (1, 1),
+                    trigger: Rect::new(480.0, 440.0, 80.0, 40.0),
+                    entry: (505.0, 10.0),
+                },
+                Door {
+                    from: (1, 1),
+                    direction: Direction::North,
+                    target: (1, 0),
+                    trigger: Rect::new(480.0, 0.0, 80.0, 40.0),
+                    entry: (505.0, 432.0),
+                },
+                Door {
+                    from: (0, 1),
+                    direction: Direction::East,
+                    target: (1, 1),
+                    trigger: Rect::new(760.0, 400.0, 40.0, 40.0),
+                    entry: (10.0, 401.0),
+                },
+                Door {
+                    from: (1, 1),
+                    direction: Direction::West,
+                    target: (0, 1),
+                    trigger: Rect::new(0.0, 400.0, 40.0, 40.0),
+                    entry: (760.0, 401.0),
+                },
+            ],
+        }
+    }
+
+    pub fn doors(&self) -> &[Door] {
+        &self.doors
+    }
+
+    /// The unique door leaving `from` through `direction`, if the map has one.
+    pub fn door(&self, from: RoomCoords, direction: Direction) -> Option<Door> {
+        self.doors
+            .iter()
+            .find(|d| d.from == from && d.direction == direction)
+            .copied()
+    }
+
+    /// Client-side detection: the first door whose **raw geometric** trigger
+    /// overlaps `player_rect`. Never uses `server_trigger`.
+    pub fn door_at(&self, from: RoomCoords, player_rect: Rect) -> Option<Door> {
+        self.doors
+            .iter()
+            .find(|d| d.from == from && d.trigger.overlaps(&player_rect))
+            .copied()
+    }
+
+    /// Server-side validation: a door exists for `(from, direction)` and the
+    /// authoritative player rect overlaps its lead-expanded `server_trigger`.
+    pub fn can_enter(&self, from: RoomCoords, direction: Direction, player_rect: Rect) -> bool {
+        self.door(from, direction)
+            .map(|d| d.server_trigger().overlaps(&player_rect))
+            .unwrap_or(false)
+    }
+}
+
+impl Default for RoomGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(test)]
 mod tests {

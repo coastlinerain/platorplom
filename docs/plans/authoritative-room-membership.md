@@ -512,7 +512,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 1 — `game`: `RoomGraph`, `Direction`, `Door`, `RoomCoords`, constants
 
-- [ ] done
+- [x] done
 - **Files**: `game/Cargo.toml`; `game/src/lib.rs`; `game/src/room_graph.rs` (new);
   `game/src/config.rs`.
 - **Change**:
@@ -537,16 +537,35 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   is expected to be RED from the tester's batch.
 - **Test**: G1–G12.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: tuple type alias, `Copy`/`PartialEq` derives on a
-    plain-data struct, `Default` delegating to `new`, an inherent method on a
-    `Copy` struct returning a new `Rect`, `match` on the direction enum,
-    `Option::map`/`unwrap_or`, slice iteration and `.copied()`, a foreign-crate
-    `serde` derive)_
-  - Watch out: _(the matrix is `[row_y][col_x]`; `door_at` must use the full
-    player rect and the raw `trigger`; only `can_enter` uses `server_trigger`;
-    validate trigger centers, not `solid_in_rect(trigger)`)_
+  - What: added `game/src/room_graph.rs` with `RoomCoords = (u8, u8)`,
+    `Direction` (serde-derived), `Door` (+`server_trigger`), and `RoomGraph`
+    (the eight-door table, `doors`, `door`, `door_at`, `can_enter`, `Default`);
+    added `ROOM_CHANGE_COOLDOWN_TICKS`, `ROOM_CHANGE_RETRY_TICKS`, and
+    `DOOR_LEAD_TOLERANCE_PX` to `game/src/config.rs`; added the `serde`
+    dependency to `game/Cargo.toml`.
+  - Why: both sides must derive "is the player at this door" from one shared
+    source of truth instead of magic pixel heuristics. `door_at` gives the
+    client its geometric detection band; `can_enter` gives the server the
+    lead-expanded validation band, so a predicted-first request is accepted
+    while arbitrary teleports still fail.
+  - Rust concepts: a tuple alias (`RoomCoords`) documents `(u8, u8)` without a
+    new type; `Copy` on the plain-data `Door` lets `door`/`door_at` return
+    `Option<Door>` by value and callers treat it as a snapshot; the
+    `serde::Serialize/Deserialize` derive on a `game`-local enum is what makes
+    the protocol crate able to reuse `Direction` over the wire; `match` on
+    `Direction` in `server_trigger` returns a new `Rect` (no mutation of the
+    `&self` value); `Option::map(...).unwrap_or(false)` collapses
+    "door exists AND rect overlaps" into one expression without an `unwrap`;
+    `Iterator::find` + `.copied()` turns `Option<&Door>` into `Option<Door>`
+    while keeping `doors` borrowed for only the scan; `Default` delegates to
+    `new()` to satisfy `clippy::new_without_default`.
+  - Watch out: the `maps.rs` comments are wrong — the matrix is
+    `[row_y][col_x]`, so `(0,0)=LVL_0_0`, `(1,0)=LVL_0_1`,
+    `(0,1)=LVL_1_0`, `(1,1)=LVL_1_1`. `door_at` must use the full player rect
+    and the raw `trigger`; only `can_enter` uses `server_trigger`. The trigger's
+    inner edge shares a tile row with the floor, so the tests validate the
+    trigger **center** tile rather than `solid_in_rect(trigger)`. Table order is
+    the deterministic `door_at` tie-breaker; do not sort the vector.
 
 ### Box 2 — `protocol`: packet surface
 
