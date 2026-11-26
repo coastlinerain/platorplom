@@ -35,6 +35,8 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::Leave { .. } => "Leave",
         GamePacket::PlayerDied { .. } => "PlayerDied",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
+        GamePacket::RequestRoomChange { .. } => "RequestRoomChange",
+        GamePacket::RoomChangeResponse { .. } => "RoomChangeResponse",
     }
 }
 
@@ -47,6 +49,7 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::Leave { id } => Some(*id),
         GamePacket::PlayerDied { id } => Some(*id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
+        GamePacket::RequestRoomChange { id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -86,8 +89,6 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
         }
         GamePacket::PlayerInput {
             id,
-            level_x,
-            level_y,
             move_left,
             move_right,
             jump,
@@ -95,7 +96,6 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             seq,
         } => serde_json::json!({
             "id": id,
-            "level": [level_x, level_y],
             "move_left": move_left,
             "move_right": move_right,
             "jump": jump,
@@ -136,6 +136,20 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             "dir": dir,
             "owner_id": owner_id,
             "seq": seq,
+        }),
+        GamePacket::RequestRoomChange { id, direction } => {
+            serde_json::json!({ "id": id, "direction": direction })
+        }
+        GamePacket::RoomChangeResponse {
+            accepted,
+            level_x,
+            level_y,
+            x,
+            y,
+        } => serde_json::json!({
+            "accepted": accepted,
+            "level": [level_x, level_y],
+            "pos": [x, y],
         }),
     }
 }

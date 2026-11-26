@@ -1,5 +1,9 @@
+use crate::network::prediction::InputRingBuffer;
 use crate::world::game::World;
 use game::entities::player::Player;
+use game::rect::Rect;
+use game::room_graph::RoomCoords;
+use protocol::GamePacket;
 
 pub fn update_remote_bullets_position(world: &mut World, dt: f32) {
     let current_room = world.current_coords;
@@ -39,6 +43,11 @@ pub fn respawn_local(world: &mut World) {
     world.last_server_tick = 0;
     world.last_server_time_ms = 0;
     world.last_acked_server_tick = 0;
+    // The canonical spawn is not inside any trigger band: start armed with no
+    // request in flight.
+    world.pending_room_change = None;
+    world.room_change_retry = 0;
+    world.room_change_armed = true;
     load_current_level(world);
 }
 
@@ -63,65 +72,74 @@ fn load_current_level(world: &mut World) {
         world.current_coords.0, world.current_coords.1
     );
 }
-pub fn check_level_transitions(world: &mut World) {
-    let (cx, cy) = world.current_coords;
-
-    // Bounds-guard: skip when coords are outside the levels matrix.
-    let maybe_level = world.levels_matrix.get(cy).and_then(|row| row.get(cx));
-    let Some(level) = maybe_level else {
+/// Client half of the room-change handshake: detect a door under the
+/// **predicted** body and, if armed, send one `RequestRoomChange`.
+///
+/// It never mutates `current_coords` or teleports; the server's ack (or an own
+/// `PlayerPos` that arrives first) applies the authoritative room.
+pub fn request_room_change(world: &mut World) {
+    let Some(id) = world.id else {
         return;
     };
 
-    let level_w = level.pixel_width();
-    let level_h = level.pixel_height();
-    let p = &mut world.player;
+    // At most one outstanding request: wait for the ack before sending again.
+    if world.pending_room_change.is_some() {
+        return;
+    }
 
-    let mut changed = false;
+    // Rejection backoff.
+    if world.room_change_retry > 0 {
+        world.room_change_retry -= 1;
+        return;
+    }
 
-    // --- SALIDA DERECHA ---
-    if p.pos.x + p.w > level_w - 5.0 {
-        // A small 5px margin
-        if cx < world.levels_matrix[0].len() - 1 {
-            world.current_coords.0 += 1;
-            p.pos.x = 10.0;
-            changed = true;
+    let rect = Rect::new(
+        world.player.pos.x,
+        world.player.pos.y,
+        world.player.w,
+        world.player.h,
+    );
+
+    // Detection uses the raw geometric trigger, never `server_trigger`.
+    match world.room_graph.door_at(world.current_room(), rect) {
+        // Left every trigger band: safe to detect again.
+        None => world.room_change_armed = true,
+        // Still inside the entry band of the door just used: no bounce.
+        Some(_) if !world.room_change_armed => {}
+        Some(door) => {
+            world.network.send(GamePacket::RequestRoomChange {
+                id,
+                direction: door.direction,
+            });
+            world.pending_room_change = Some(door.direction);
         }
     }
-    // --- SALIDA IZQUIERDA ---
-    else if p.pos.x < -5.0 && cx > 0 {
-        world.current_coords.0 -= 1;
-        p.pos.x = world.levels_matrix[cy][cx - 1].pixel_width() - p.w - 10.0;
-        changed = true;
-    }
+}
 
-    // --- SALIDA ABAJO ---
-    if p.pos.y + p.h > level_h - 5.0 {
-        if cy < world.levels_matrix.len() - 1 {
-            world.current_coords.1 += 1;
-            p.pos.y = 10.0;
-            changed = true;
-        }
-    }
-    // --- SALIDA ARRIBA ---
-    else if p.pos.y + p.h < 5.0 && cy > 0 {
-        world.current_coords.1 -= 1;
-        p.pos.y = world.levels_matrix[cy - 1][cx].pixel_height() - p.h - 10.0;
-        changed = true;
-    }
+/// Applies a server-authoritative room/position (accept ack, defensive reject
+/// adoption, or an own `PlayerPos` that named a new room).
+///
+/// Idempotent: applying the same state twice is harmless. Clears the
+/// unacknowledged input buffer so old-room inputs are not replayed into the new
+/// room, and `load_current_level` resets bullets/clock/sticky edges.
+pub fn apply_room_change_local(world: &mut World, room: RoomCoords, pos: glam::Vec2) {
+    world.current_coords = (room.0 as usize, room.1 as usize);
+    world.player.pos = pos;
+    world.player.vel = glam::Vec2::ZERO;
+    // `dir` is preserved: this is a room change, not a respawn.
 
-    if changed {
-        println!(
-            "Level changed: {},{}",
-            world.current_coords.0, world.current_coords.1
-        );
-        load_current_level(world);
-        // Snap the interpolation source to the post-teleport entry position so
-        // `draw(alpha)` renders at the new-room spawn instead of lerping from
-        // the old-room position for one frame (the level is already drawn at
-        // the new coords).
-        world.prev_player_pos = world.player.pos;
-        world.prev_player_dir = world.player.dir;
-    }
+    // Snap the interpolation source so `draw(alpha)` does not lerp from the old
+    // room's position.
+    world.prev_player_pos = pos;
+    world.prev_player_dir = world.player.dir;
+
+    world.input_buffer = InputRingBuffer::new();
+    world.pending_room_change = None;
+    world.room_change_retry = 0;
+    // Disarmed until the body leaves every band (anti-bounce).
+    world.room_change_armed = false;
+
+    load_current_level(world);
 }
 
 // Spec 3 — request/ack primitives. See plan Box 5 (C1–C6).

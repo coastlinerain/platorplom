@@ -61,8 +61,6 @@ pub fn send_input(world: &mut World) {
 
         let input_msg = GamePacket::PlayerInput {
             id,
-            level_x: world.current_coords.0 as u8,
-            level_y: world.current_coords.1 as u8,
             move_left,
             move_right,
             jump,
@@ -102,6 +100,11 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.last_server_tick = 0;
             world.last_server_time_ms = 0;
             world.last_acked_server_tick = 0;
+            // A fresh session starts with no room request in flight, at the
+            // canonical spawn (not inside any trigger band).
+            world.pending_room_change = None;
+            world.room_change_retry = 0;
+            world.room_change_armed = true;
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {

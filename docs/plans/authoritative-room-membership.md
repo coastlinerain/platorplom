@@ -745,7 +745,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 5 — client: world state, request/ack primitives, remove the local transition
 
-- [ ] done
+- [x] done
 - **Files**: `client/src/world/game.rs`; `client/src/world/lib.rs`;
   `client/src/lib.rs`; `client/src/network/world.rs` (`send_input` + the
   `JoinResponse` reset + C7 for now); `client/src/network/logging.rs`;
@@ -788,18 +788,40 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   still red.
 - **Test**: C1–C7 + L1–L4.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: adding struct fields with a single initializer,
-    calling a method on `Box<dyn PacketIO>`, `Rect` built from a `Vec2` +
-    `w`/`h`, replacing a ring buffer with `InputRingBuffer::new()`, moving a
-    function between modules and updating re-exports/imports, `Rc<RefCell<Vec<_>>>`
-    as a send recorder)_
-  - Watch out: _(the client must never mutate `current_coords` in the request
-    path; `door_at` stays on the raw geometric `trigger` — never call
-    `server_trigger` here; `apply_room_change_local` resets `retry` so the reject
-    path can set it afterwards; `load_current_level` does not clear the input
-    buffer — do it explicitly)_
+  - What: `World` gained `room_graph`, `pending_room_change`,
+    `room_change_armed`, `room_change_retry` and a `current_room()` helper;
+    `check_level_transitions` is deleted and replaced by
+    `request_room_change` + `apply_room_change_local` in `world/lib.rs`;
+    `respawn_local` resets the request state to an armed spawn; `send_input`
+    drops the room fields and `JoinResponse` resets the new state; logging
+    covers both new variants; both transport `send` match blocks route
+    `RequestRoomChange` to `reliable_ordered`; the re-export in `client/src/lib.rs`
+    changed.
+  - Why: the client no longer owns membership. It detects a door on its
+    **predicted** body and sends one direction request, then waits. The server's
+    ack (or its own `PlayerPos`) applies the room. This removes the local
+    edge heuristic and its hardcoded offsets, and with them a whole class of
+    "the client says it is in room X" desyncs.
+  - Rust concepts: adding fields to a struct with one literal initializer means
+    the compiler lists every missing field; `current_room(&self)` centralises
+    the `usize → u8` casts at the boundary while `current_coords` keeps its
+    existing `usize` matrix indexing; `Rect::new(player.pos.x, player.pos.y,
+    player.w, player.h)` builds the overlap input from a `Vec2` plus size;
+    `world.input_buffer = InputRingBuffer::new()` replaces the buffer wholesale
+    (no partial clear API needed); calling `world.network.send(...)` goes
+    through `Box<dyn PacketIO>` dynamic dispatch; moving a function between
+    sibling modules requires updating the `use`/`pub use` chain; the tests use
+    `Rc<RefCell<Vec<GamePacket>>>` as a shared send recorder (single-threaded,
+    so `Rc`/`RefCell` rather than `Arc`/`Mutex`); `match` with a
+    `Some(_) if !world.room_change_armed` guard expresses the anti-bounce rule.
+  - Watch out: the request path must never mutate `current_coords`;
+    `door_at` stays on the raw geometric `trigger` (never `server_trigger`);
+    `apply_room_change_local` resets `room_change_retry = 0`, so a reject
+    handler must set the retry **after** any defensive adoption call; the
+    input buffer is cleared explicitly because `load_current_level` does not
+    touch it; detection uses the predicted position, so a door request can
+    arrive while the server body is a few px short (that is what the server's
+    8 px lead tolerance absorbs).
 
 ### Box 6 — client network: response handler, own-`PlayerPos` adoption, drop `coords_match`
 

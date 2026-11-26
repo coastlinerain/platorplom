@@ -30,7 +30,7 @@ impl PacketIO for RealPacketIO {
         log_packet("sent", &packet);
         let bytes = postcard::to_allocvec(&packet).unwrap();
         let pkt = match &packet {
-            GamePacket::JoinRequest => {
+            GamePacket::JoinRequest | GamePacket::RequestRoomChange { .. } => {
                 laminar::Packet::reliable_ordered(self.server_addr, bytes, None)
             }
             _ => laminar::Packet::unreliable(self.server_addr, bytes),
@@ -67,7 +67,7 @@ impl PacketIO for HeadlessPacketIO {
         log_packet("sent", &packet);
         let bytes = postcard::to_allocvec(&packet).unwrap();
         let pkt = match &packet {
-            GamePacket::JoinRequest => {
+            GamePacket::JoinRequest | GamePacket::RequestRoomChange { .. } => {
                 laminar::Packet::reliable_ordered(self.server_addr, bytes, None)
             }
             _ => laminar::Packet::unreliable(self.server_addr, bytes),
