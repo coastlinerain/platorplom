@@ -1,2 +1,2 @@
 mod world;
-pub use world::{BulletSpawnInfo, PlayerHitInfo, ServerWorld};
+pub use world::{BulletSpawnInfo, PlayerHitInfo, RoomChangeInfo, ServerWorld};

@@ -1,3 +1,5 @@
+use game::room_graph::Direction;
+
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GamePacket {
     JoinRequest,
@@ -24,8 +26,6 @@ pub enum GamePacket {
     },
     PlayerInput {
         id: u8,
-        level_x: u8,
-        level_y: u8,
         move_left: bool,
         move_right: bool,
         jump: bool,
@@ -40,5 +40,21 @@ pub enum GamePacket {
         dir: f32,
         owner_id: u8,
         seq: u16,
+    },
+    // --- NEW (spec 3, appended to keep existing variant indices stable) ---
+    /// Client → server: ask to cross the door on `direction` from the current
+    /// room. The server never trusts the id for state lookup.
+    RequestRoomChange {
+        id: u8,
+        direction: Direction,
+    },
+    /// Server → requesting client: authoritative room + position (the canonical
+    /// entry on acceptance, the unchanged state on rejection).
+    RoomChangeResponse {
+        accepted: bool,
+        level_x: u8,
+        level_y: u8,
+        x: f32,
+        y: f32,
     },
 }

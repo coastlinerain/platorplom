@@ -1,6 +1,7 @@
 use crate::network::packet_io::PacketIO;
 use crate::network::prediction::{self, InputEntry, InputRingBuffer};
 use crate::world::game::{ConfirmedBullet, World};
+use game::config::ROOM_CHANGE_RETRY_TICKS;
 use game::entities::bullet::Bullet;
 use game::entities::nemesis::Nemesis;
 use protocol::GamePacket;
@@ -61,8 +62,6 @@ pub fn send_input(world: &mut World) {
 
         let input_msg = GamePacket::PlayerInput {
             id,
-            level_x: world.current_coords.0 as u8,
-            level_y: world.current_coords.1 as u8,
             move_left,
             move_right,
             jump,
@@ -102,6 +101,11 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.last_server_tick = 0;
             world.last_server_time_ms = 0;
             world.last_acked_server_tick = 0;
+            // A fresh session starts with no room request in flight, at the
+            // canonical spawn (not inside any trigger band).
+            world.pending_room_change = None;
+            world.room_change_retry = 0;
+            world.room_change_armed = true;
             println!("Connected! My ID is {}", assigned_id);
         }
         GamePacket::PlayerPos {
@@ -139,52 +143,56 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 world.last_acked_server_tick = server_tick;
                 // --- END CLOCK SYNCHRONIZATION ---
 
+                // --- ROOM ADOPTION for own player ---
+                // Own `PlayerPos` is authoritative for room membership as well
+                // as position: the reliable `RoomChangeResponse` and this
+                // unreliable packet can arrive in either order. Gate on
+                // `last_seq` so a stale pre-transition packet cannot drag the
+                // client back to the old room.
+                let stale = !game::is_newer_seq(last_seq, world.last_acked_seq);
+                let server_room = (level_x, level_y);
+                if !stale && server_room != world.current_room() {
+                    crate::world::lib::apply_room_change_local(
+                        world,
+                        server_room,
+                        glam::Vec2::new(x, y),
+                    );
+                }
+
                 // --- RECONCILIATION for own player ---
-                // Guard: only reconcile when the server's reported room matches
-                // the client's current room AND the server position is not inside
-                // a solid tile. Without this, crossing a room boundary rewinds the
-                // player into a wall (the server never teleports on room transition
-                // — D9 scope boundary — so its position lags behind the client's).
-                let coords_match = level_x as usize == world.current_coords.0
-                    && level_y as usize == world.current_coords.1;
-                if coords_match {
-                    // Bounds-guard: a bogus (99,99) coords echoed from the server
-                    // must not index-panic levels_matrix.  Only reconcile when
-                    // the client's current room is valid for its own matrix.
-                    let maybe_level = world
-                        .levels_matrix
-                        .get(world.current_coords.1)
-                        .and_then(|row| row.get(world.current_coords.0));
-                    let Some(level) = maybe_level else {
-                        // Coords out of range — skip reconciliation this frame.
-                        return;
-                    };
-                    // Use solid_in_rect (handles OOB gracefully, as non-solid)
-                    // instead of colision (treats OOB as solid) so that
-                    // reconciliation works at room edges where the player rect
-                    // extends beyond the level boundary.
-                    let not_in_wall = !level.solid_in_rect(game::rect::Rect::new(
+                // Bounds-guard: a bogus (99,99) coords must not index-panic
+                // levels_matrix. Only reconcile when the (adopted) current room
+                // is valid for the matrix.
+                let maybe_level = world
+                    .levels_matrix
+                    .get(world.current_coords.1)
+                    .and_then(|row| row.get(world.current_coords.0));
+                let Some(level) = maybe_level else {
+                    // Coords out of range — skip reconciliation this frame.
+                    return;
+                };
+                // Use solid_in_rect (handles OOB gracefully, as non-solid)
+                // instead of colision (treats OOB as solid) so that
+                // reconciliation works at room edges where the player rect
+                // extends beyond the level boundary.
+                let not_in_wall = !level.solid_in_rect(game::rect::Rect::new(
+                    x,
+                    y,
+                    world.player.w,
+                    world.player.h,
+                ));
+                if not_in_wall {
+                    prediction::reconcile(
+                        &mut world.player,
+                        &mut world.input_buffer,
+                        &mut world.last_acked_seq,
                         x,
                         y,
-                        world.player.w,
-                        world.player.h,
-                    ));
-                    if not_in_wall {
-                        prediction::reconcile(
-                            &mut world.player,
-                            &mut world.input_buffer,
-                            &mut world.last_acked_seq,
-                            x,
-                            y,
-                            dir,
-                            last_seq,
-                            level,
-                        );
-                    }
+                        dir,
+                        last_seq,
+                        level,
+                    );
                 }
-                // else: server is reporting position from a different room (or
-                // inside a wall) — skip reconciliation; client prediction is
-                // more correct until the server position catches up.
             } else {
                 // --- Remote player: push interpolation snapshot ---
                 let nemesis = world.other_players.entry(id).or_insert_with(|| {
@@ -286,6 +294,43 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.other_players.remove(&id);
             world.other_interp.remove(&id);
         }
+        GamePacket::RoomChangeResponse {
+            accepted,
+            level_x,
+            level_y,
+            x,
+            y,
+        } => {
+            let room = (level_x, level_y);
+            let pos = glam::Vec2::new(x, y);
+
+            if accepted {
+                crate::world::lib::apply_room_change_local(world, room, pos);
+            } else {
+                // Defensive: the server does not mutate state on a rejection,
+                // but if it reports a different room, adopt it first. Adoption
+                // resets `room_change_retry`, so set the retry afterwards.
+                if room != world.current_room() {
+                    crate::world::lib::apply_room_change_local(world, room, pos);
+                }
+
+                // Snap the predicted body back to the authoritative position.
+                world.player.pos = pos;
+                world.player.vel = glam::Vec2::ZERO;
+                world.prev_player_pos = pos;
+                world.prev_player_dir = world.player.dir;
+
+                // Drop unacknowledged old-position inputs so replay cannot undo
+                // the snap-back on the next tick.
+                world.input_buffer = InputRingBuffer::new();
+
+                world.pending_room_change = None;
+                world.room_change_retry = ROOM_CHANGE_RETRY_TICKS;
+            }
+        }
+        // Server→client only: a client must never receive a request. Ignore it
+        // (defense in depth).
+        GamePacket::RequestRoomChange { .. } => {}
         _ => {}
     }
 }
@@ -299,13 +344,14 @@ pub fn send_join_req(network: &mut dyn PacketIO) {
 // Boxes 1 + 5 for the API these exercise.
 #[cfg(test)]
 mod tests {
-    use super::handle_packet;
+    use super::{handle_packet, send_input};
     use crate::network::packet_io::PacketIO;
     use crate::world::game::World;
     use game::config::TICK_HZ;
     use game::entities::bullet::Bullet;
     use game::entities::nemesis::Nemesis;
     use game::maps::Map;
+    use game::room_graph::Direction;
     use glam::Vec2;
     use protocol::GamePacket;
     use std::cell::RefCell;
@@ -451,5 +497,221 @@ mod tests {
             "client must never send PlayerDied: {:?}",
             sent.0.borrow()
         );
+    }
+
+    /// C7 — `send_input` builds a `PlayerInput` with no room fields (the struct
+    /// itself is the compile-time assertion) and still carries flags + seq.
+    #[test]
+    fn send_input_omits_room_fields() {
+        let (mut world, sends) = make_world();
+        world.id = Some(3);
+        world.move_right = true;
+        world.pressed_jump = true;
+
+        send_input(&mut world);
+
+        {
+            let sent = sends.0.borrow();
+            assert_eq!(sent.len(), 1);
+            match &sent[0] {
+                GamePacket::PlayerInput {
+                    id,
+                    move_left,
+                    move_right,
+                    jump,
+                    shoot,
+                    seq,
+                } => {
+                    assert_eq!(*id, 3);
+                    assert!(!*move_left);
+                    assert!(*move_right);
+                    assert!(*jump);
+                    assert!(!*shoot);
+                    assert_eq!(*seq, world.input_seq);
+                }
+                other => panic!("expected PlayerInput, got {other:?}"),
+            }
+        }
+        assert_eq!(world.input_buffer.len(), 1);
+    }
+
+    /// A single buffered movement input, used to prove the room-change paths
+    /// clear it.
+    fn dirty_input(world: &mut World) {
+        world
+            .input_buffer
+            .push(crate::network::prediction::InputEntry {
+                seq: 1,
+                move_left: true,
+                move_right: false,
+                jump: false,
+            });
+    }
+
+    /// C8 — an accepted `RoomChangeResponse` applies the room/entry, zeroes
+    /// velocity, preserves `dir`, clears the input buffer and bullets, and is
+    /// idempotent.
+    #[test]
+    fn room_change_response_accepted_applies_room_and_entry() {
+        let (mut world, _sent) = make_world();
+        world.id = Some(1);
+        world.player.id = 1;
+        world.current_coords = (0, 0);
+        world.player.pos = Vec2::new(766.0, 320.0);
+        world.player.dir = -1.0;
+        world.pending_room_change = Some(Direction::East);
+        world.room_change_armed = true;
+        dirty_input(&mut world);
+        world.bullets.push(Bullet::new(Vec2::new(0.0, 0.0), 1.0, 1));
+
+        handle_packet(
+            &mut world,
+            GamePacket::RoomChangeResponse {
+                accepted: true,
+                level_x: 1,
+                level_y: 0,
+                x: 10.0,
+                y: 321.0,
+            },
+        );
+
+        assert_eq!(world.current_coords, (1, 0));
+        assert_eq!(world.player.pos, Vec2::new(10.0, 321.0));
+        assert_eq!(world.player.vel, Vec2::ZERO);
+        assert_eq!(world.player.dir, -1.0);
+        assert_eq!(world.prev_player_pos, world.player.pos);
+        assert_eq!(world.pending_room_change, None);
+        assert!(!world.room_change_armed);
+        assert!(world.input_buffer.is_empty());
+        assert!(world.bullets.is_empty());
+
+        // Applying the same ack again is harmless.
+        handle_packet(
+            &mut world,
+            GamePacket::RoomChangeResponse {
+                accepted: true,
+                level_x: 1,
+                level_y: 0,
+                x: 10.0,
+                y: 321.0,
+            },
+        );
+
+        assert_eq!(world.current_coords, (1, 0));
+        assert_eq!(world.player.pos, Vec2::new(10.0, 321.0));
+        assert_eq!(world.player.vel, Vec2::ZERO);
+        assert_eq!(world.pending_room_change, None);
+        assert!(!world.room_change_armed);
+    }
+
+    /// C9 — a rejected response snaps the body to the authoritative position,
+    /// clears the buffer, records the retry delay, and does not change room.
+    #[test]
+    fn room_change_response_rejected_snaps_back() {
+        let (mut world, _sent) = make_world();
+        world.id = Some(1);
+        world.player.id = 1;
+        world.current_coords = (0, 0);
+        world.player.pos = Vec2::new(500.0, 300.0);
+        world.pending_room_change = Some(Direction::East);
+        world.room_change_armed = true;
+        dirty_input(&mut world);
+
+        handle_packet(
+            &mut world,
+            GamePacket::RoomChangeResponse {
+                accepted: false,
+                level_x: 0,
+                level_y: 0,
+                x: 760.0,
+                y: 321.0,
+            },
+        );
+
+        assert_eq!(world.current_coords, (0, 0));
+        assert_eq!(world.player.pos, Vec2::new(760.0, 321.0));
+        assert_eq!(world.player.vel, Vec2::ZERO);
+        assert_eq!(world.prev_player_pos, world.player.pos);
+        assert_eq!(world.pending_room_change, None);
+        assert_eq!(
+            world.room_change_retry,
+            game::config::ROOM_CHANGE_RETRY_TICKS
+        );
+        assert!(world.input_buffer.is_empty());
+    }
+
+    /// C10 — an own `PlayerPos` naming a new room is adopted before
+    /// reconciling (the response may still be in flight on the reliable
+    /// stream).
+    #[test]
+    fn own_player_pos_with_new_room_adopts_it() {
+        let (mut world, _sent) = make_world();
+        world.id = Some(1);
+        world.player.id = 1;
+        world.current_coords = (0, 0);
+        world.last_acked_seq = 10;
+
+        handle_packet(
+            &mut world,
+            GamePacket::PlayerPos {
+                id: 1,
+                x: 10.0,
+                y: 321.0,
+                dir: 1.0,
+                level_x: 1,
+                level_y: 0,
+                last_seq: 11,
+                server_tick: 5,
+                server_time_ms: 1000,
+            },
+        );
+
+        assert_eq!(world.current_coords, (1, 0));
+        assert_eq!(world.player.pos, Vec2::new(10.0, 321.0));
+        assert_eq!(world.prev_player_pos, world.player.pos);
+        assert!(world.input_buffer.is_empty());
+        assert_eq!(world.last_acked_seq, 11);
+    }
+
+    /// C11 — a stale pre-transition own `PlayerPos` must not undo an accepted
+    /// room change.
+    #[test]
+    fn stale_own_player_pos_does_not_undo_room_change() {
+        let (mut world, _sent) = make_world();
+        world.id = Some(1);
+        world.player.id = 1;
+        world.current_coords = (0, 0);
+        world.player.pos = Vec2::new(766.0, 320.0);
+
+        handle_packet(
+            &mut world,
+            GamePacket::RoomChangeResponse {
+                accepted: true,
+                level_x: 1,
+                level_y: 0,
+                x: 10.0,
+                y: 321.0,
+            },
+        );
+        assert_eq!(world.current_coords, (1, 0));
+
+        world.last_acked_seq = 20;
+        handle_packet(
+            &mut world,
+            GamePacket::PlayerPos {
+                id: 1,
+                x: 766.0,
+                y: 320.0,
+                dir: 1.0,
+                level_x: 0,
+                level_y: 0,
+                last_seq: 5,
+                server_tick: 5,
+                server_time_ms: 1000,
+            },
+        );
+
+        assert_eq!(world.current_coords, (1, 0));
+        assert_eq!(world.player.pos, Vec2::new(10.0, 321.0));
     }
 }

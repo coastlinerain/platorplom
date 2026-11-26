@@ -122,8 +122,10 @@ pub fn advance_sticky(sticky: u8, pressed: bool) -> (bool, u8) {
 ///
 /// 2. Returns the new `last_acked_seq` value (whether updated or not).
 ///
-/// The `level` parameter is the collision level for the client's current room
-/// (never the server-reported room — see AC 38).
+/// The `level` parameter is the collision level for the client's current room.
+/// Own `PlayerPos` handling adopts an authoritative new room *before* calling
+/// this, so the level passed in is the adopted room's level; the caller never
+/// builds it from a server-reported room the client has not adopted.
 #[allow(clippy::too_many_arguments)]
 pub fn reconcile(
     player: &mut game::entities::player::Player,
@@ -605,19 +607,19 @@ mod tests {
         assert_eq!(player.dir, 1.0);
     }
 
-    /// AC 38 (edge case) — replay uses the client's current room, not the
-    /// server-reported coords.
+    /// AC 38 (edge case) — replay uses the level the caller supplies for the
+    /// client's **adopted** room.
     ///
-    /// The server PlayerPos may report level_x/level_y different from the
-    /// client's current_coords (e.g. during a room transition where the server
-    /// lags behind). The replay MUST use the client's current room's collision
-    /// level, NOT the server-reported room. The test verifies that calling
-    /// reconcile with a level from a different room than the server reports
-    /// completes without panic and produces a valid position.
+    /// The caller (`handle_packet`) adopts an authoritative room from the own
+    /// `PlayerPos`/`RoomChangeResponse` before reconciling, then passes that
+    /// room's level. `reconcile` itself has no room argument and must use the
+    /// supplied level for collision, never a server-reported coord. The test
+    /// verifies that calling reconcile with a level from a different room than
+    /// the server reports completes without panic and produces a valid
+    /// position.
     #[test]
     fn replay_uses_client_room_not_server_coords() {
-        // Player is in room (0, 0). Server PlayerPos might claim room (1, 0)
-        // but the client dictates which level is used for collision.
+        // Player is in room (0, 0); the caller passes room (0, 0)'s level.
         let mut player = Player::new(0);
         player.pos = glam::Vec2::new(100.0, 100.0);
 

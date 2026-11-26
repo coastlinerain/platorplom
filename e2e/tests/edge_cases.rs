@@ -3,31 +3,33 @@
 use e2e::harness::TestHarness;
 
 #[test]
-fn f1_bogus_level_coords_fall_back_to_origin() {
+fn f1_bogus_client_room_is_ignored() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
 
-    // Artificially move the client to bogus coords (99, 99).
+    // The client tries to claim a bogus room locally.
     h.client_mut(p0).world.current_coords = (99, 99);
 
-    // Hold right so the client sends a PlayerInput reporting coords (99, 99).
-    // The server must clamp it to the origin level without panicking.
+    // Hold right so the client keeps sending normal movement inputs.
     h.hold_right(p0, 5);
     h.tick_n(5);
 
-    // The server processes the tick without panic.
-    // The server stores the client-reported coords (99, 99) in coords map,
-    // but uses origin level for collision via fallback. Verify no panic.
-    let (sx, _) = h.server_player_pos(p0);
+    // Movement is still processed by the server...
     assert!(
-        sx > 100.0,
-        "server should still process movement with bogus coords"
+        h.server_player_pos(p0).0 > 100.0,
+        "server should still process movement after a bogus client room"
     );
-    let coords_after = h.server_player_coords(p0);
+    // ...but the client cannot claim a room: the server stays authoritative...
     assert_eq!(
-        coords_after,
-        (99, 99),
-        "server accepts client-reported coords"
+        h.server_player_coords(p0),
+        (0, 0),
+        "server must ignore the client-claimed room"
+    );
+    // ...and the client's own PlayerPos re-adopts the authoritative room.
+    assert_eq!(
+        h.client_player_coords(p0),
+        (0, 0),
+        "client should re-adopt the server-authoritative room"
     );
 }
 
