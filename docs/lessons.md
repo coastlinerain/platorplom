@@ -576,3 +576,23 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `server/src/world.rs` (`ServerWorld::update`), callers in `server/src/main.rs`, `e2e/src/harness.rs`, and 6 `#[test]` sites.
 - **What it is**: `update` went from `-> (Vec<BulletSpawnInfo>, Vec<EnemyDiedInfo>)` to `-> Vec<BulletSpawnInfo>`. Every `let (shots, deaths) = world.update(...)` destructuring is now a type error, so the compiler enumerates every consumer that must change — including the `mod tests` block and the *second*, top-level `#[test]` region the editor might miss by eye.
 - **Gotcha / insight**: a signature change is a cheap, precise "find all callers". Prefer it over grep when the thing you're removing flows through a return value — the type system won't let you forget a call site.
+
+## feat: authoritative player death (2026-11-26)
+
+### `sort_by_key` turns HashMap iteration order into a deterministic result (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`update` second pass, `raycast_player`).
+- **What it is**: `self.players` is a `HashMap`, whose iteration order is unspecified (random per process, keyed by the random `RandomState`). Bullet-id assignment and multi-victim "closest hit" resolution would therefore be nondeterministic across runs. Sorting `shoot_requests` by `player_id` (and iterating victims in ascending `id`) before the second pass makes both bullet ids and the hit-selection deterministic — reproducible in tests and identical across two servers.
+- **Gotcha / insight**: determinism is not a HashMap property; it is a property you *add* with an explicit `sort_by_key` (or `BTreeMap`) at the point of consumption. Closest-hit-wins uses a strict `<` on `distance` while iterating ascending ids, so an exact distance tie resolves to the lower id without an extra sort.
+
+### `&self` raycast, then `&mut self` respawn — the borrow split in one tick (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`update` second pass → `raycast_player` / `respawn`).
+- **What it is**: the hit-detection pass reads every player's position through `&self` (`raycast_player` takes `&self` and returns `Option<(u8, f32)>`), collecting victims into a `Vec`. Only *after* the read-only loop does the method mutate (`respawn(&mut self, id)`), so the immutable borrows end before the mutable one begins. A single `update` call is split into a pure read phase and a write phase precisely so Rust's borrow checker can prove there is no aliasing.
+- **Gotcha / insight**: this is the canonical "collect-then-mutate" pattern for iterating a collection while deleting/resetting from it. If `respawn` were called inside the loop, the `&self` borrow from the raycast (or the iteration over `self.players`) would conflict with `&mut self` — the compiler forces the ordering, which also happens to be the *correct* ordering (a victim can't be teleported mid-pass and hit twice in one tick).
+
+### `dir.signum()` vs "only the sign matters" — an implicit invariant (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`raycast_player`).
+- **What it is**: the ray math is `d_near = (near_edge - spawn_x) * dir` and `hit_x = spawn_x + dir * distance`. The spec says "only the sign of `dir` matters", which is true only while `dir ∈ {−1.0, 1.0}`. Today `Player.dir` is ±1.0, so it holds; but the invariant is implicit, and a `dir` with `|dir| ≠ 1` would silently scale both the hit point and the closest-hit ordering.
+- **Gotcha / insight**: when a function's contract is "only the sign matters", make the code say so — normalize `let dir = dir.signum()` at the top — rather than trusting the caller. This is the flagged (MINOR) hardening from QA; the lesson is to encode the invariant instead of documenting it.

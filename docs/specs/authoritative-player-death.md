@@ -1,6 +1,6 @@
 # Authoritative player death
 
-- Status: draft
+- Status: implemented
 - Date: 2026-11-26
 - Branch: `feat/authoritative-player-death`
 - Reference: `docs/specs/netcode-hardening-roadmap.md` (spec 2)

@@ -642,11 +642,11 @@ Each box is a small, independently verifiable step. The `implementer` fills the
       PlayerDied-before-BulletSpawn harness ordering (Step 4b).
 - [x] `PlayerInput.level_x/level_y` and client-claimed `coords` are still present
       (spec 3 owns them).
-- [ ] Process: update `docs/progress.md` (status + next actions: spec 3 is next),
-      add `docs/lessons.md` entries for `sort_by_key` as the determinism fix for
-      HashMap-driven bullet-id/hit order and for the `&self` raycast read
-      followed by the `&mut self` respawn write (borrow split), and record an ADR
-      for the 8 ambiguities resolved in this plan.
+- [x] Process: update `docs/progress.md` (status + next actions: spec 3 is next),
+      add `docs/lessons.md` entries for `sort_by_key` determinism and the `&self`
+      raycast → `&mut self` respawn borrow split, and record ADR-0003 (player death
+      is server-authoritative — 5 durable decisions; the plan-internal ambiguities
+      stay documented in this plan).
 
 ## Explain (commit body template — fill per box)
 
