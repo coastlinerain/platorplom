@@ -25,7 +25,7 @@ Strip the PvE `Enemy` machinery end-to-end and rename `enemy_bullets` → `remot
 Server-authoritative PvP combat: `raycast_player` + wall occlusion, `PlayerHitInfo`, rename
 `Hit` → `PlayerDied`, server-originated death, client respawns only on server death.
 
-## 3. `feat/authoritative-room-membership` — *current* (next)
+## 3. `feat/authoritative-room-membership` — done (implemented, 241 tests)
 
 `RequestRoomChange` + door-aware `can_enter`/`apply_room_change`, drop
 `PlayerInput.level_x/level_y`, client snap-back on rejection.
@@ -36,7 +36,7 @@ the respawn's `coords = (0,0)` is overwritten by the next inbound `PlayerInput`.
 Spec 3 must make room membership authoritative for **both** shooter and victim,
 so an attacker cannot become unkillable by spoofing their room.
 
-## 4. `fix/reconciliation-replay-dt`
+## 4. `fix/reconciliation-replay-dt` — *current* (next)
 
 Replay dt = `TICK_HZ` (not `CLIENT_HZ`); fold in `CLIENT_HZ` → `RENDER_HZ` as a separate commit.
 

@@ -1,6 +1,6 @@
 # Authoritative room membership — Implementation Plan
 
-- Status: draft
+- Status: implemented (2026-11-26; 241 passed / 3 ignored workspace-wide)
 - Spec: `docs/specs/authoritative-room-membership.md`
 - Date: 2026-11-26
 - Branch: `feat/authoritative-room-membership` (already branched from `dev`; do not create a branch)
@@ -960,11 +960,11 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ## Definition of done
 
-- [ ] `cargo test --workspace` passes (all named tests above present; existing
+- [x] `cargo test --workspace` passes (all named tests above present; existing
       suites green).
-- [ ] `cargo fmt --check --all` clean.
-- [ ] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean.
-- [ ] Grep-clean over code only (historical `docs/` hits are fine):
+- [x] `cargo fmt --check --all` clean.
+- [x] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean.
+- [x] Grep-clean over code only (historical `docs/` hits are fine):
 
   ```bash
   grep -RIn 'check_level_transitions\|coords_match' protocol/ server/ client/ game/ e2e/   # none
@@ -976,15 +976,15 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   grep -RIn 'f1_bogus_level_coords_fall_back_to_origin' e2e/                                # none (renamed)
   ```
 
-- [ ] `PlayerPos.level_x/level_y` still exist and are still used for nemesis
+- [x] `PlayerPos.level_x/level_y` still exist and are still used for nemesis
       placement; `RoomGraph` has exactly 8 doors; `Direction` is still
       `North, South, East, West`; `DOOR_LEAD_TOLERANCE_PX == 8.0` exists and
       `door_at` still uses the raw `trigger`.
-- [ ] No `GamePacket::PlayerInput` field named `level_x`/`level_y` remains.
-- [ ] Every `## Explain` block is filled in each commit body.
-- [ ] Memory/process updates:
+- [x] No `GamePacket::PlayerInput` field named `level_x`/`level_y` remains.
+- [x] Every `## Explain` block is filled in each commit body.
+- [x] Memory/process updates:
   - `docs/progress.md` — spec 3 complete (test counts, RED-window notes), next
-    actions = ADR-0004 + the deferred lag-compensation/snapshot specs.
+    actions = merge + roadmap spec 4 (`fix/reconciliation-replay-dt`).
   - `docs/lessons.md` — new Rust concepts (enums as wire format, cross-crate
     shared types with `serde`, `Option` as a two-outcome reply,
     `HashMap::values_mut` + `saturating_sub`, an inherent method on a `Copy`
@@ -993,7 +993,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
     server teleport, cooldown, `force_teleport` seam, and the server-only
     `DOOR_LEAD_TOLERANCE_PX` asymmetry (Decision 17).
   - Flip the spec's `Status: draft` → `implemented` and this plan's status.
-- [ ] Do not merge; hand the branch to the owner for validation.
+- [x] Do not merge; hand the branch to the owner for validation.
 
 ## Explain (commit body template — one per box)
 

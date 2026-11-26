@@ -1,6 +1,6 @@
 # Authoritative room membership
 
-- Status: draft
+- Status: implemented (2026-11-26)
 - Date: 2026-11-26
 - Branch: `feat/authoritative-room-membership`
 - Reference: `docs/specs/netcode-hardening-roadmap.md` (spec 3); spec 2 QA
