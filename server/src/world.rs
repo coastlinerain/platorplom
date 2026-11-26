@@ -676,10 +676,8 @@ fn shoot_cooldown_enforced() {
     assert_eq!(shots6[0].bullet_id, 1); // Incremented
 }
 
-// NOTE (tester, spec 2 — authoritative player death): these tests compile
-// against the planned API (`PlayerHitInfo`, `ServerWorld::raycast_player`,
-// `ServerWorld::respawn`, `update -> (Vec<BulletSpawnInfo>, Vec<PlayerHitInfo>)`)
-// and are RED until Box 3 lands.
+// Spec 2 (authoritative player death) — raycast / hit / respawn tests. See plan
+// Box 3 for the API these exercise.
 #[cfg(test)]
 mod raycast_and_hit_tests {
     use super::{PlayerHitInfo, ServerWorld};

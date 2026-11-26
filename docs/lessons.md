@@ -406,9 +406,9 @@ Running journal of Rust concepts encountered while building Rustvania.
 
 ### Clock sync reset triggers (Join, Hit, Room Transition, F11) (2026-11-25)
 
-- **Where**: `client/src/network/world.rs` (JoinResponse, Hit), `client/src/world/lib.rs` (`load_current_level`), `client/src/world/game.rs` (`update` F11).
-- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `Hit` for own player (death/respawn teleport), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset — removed in Phase 2h when `main.rs` was rewritten as a thin loop; the remaining triggers are JoinResponse, Hit, and room transition).
-- **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. `Hit` handling is now in both `handle_packet` (server-broadcast death) AND `handle_death` (client-initiated death) — keep both in sync.
+- **Where**: `client/src/network/world.rs` (JoinResponse, `PlayerDied`), `client/src/world/lib.rs` (`load_current_level` / `respawn_local`), `client/src/world/game.rs` (`update` F11 — removed in Phase 2h).
+- **What it is**: Clock sync fields (`client_tick`, `server_tick_offset`, `clock_offset_ms`, `last_server_tick`, `last_server_time_ms`, `last_acked_server_tick`) are zeroed on: (1) `JoinResponse` (new session), (2) `PlayerDied` for own player (death/respawn teleport — server-authoritative since spec 2), (3) `load_current_level` (room transition teleport), (4) `KeyCode::F11` (manual debug reset — removed in Phase 2h when `main.rs` was rewritten as a thin loop; the remaining triggers are JoinResponse, PlayerDied, and room transition).
+- **Gotcha / insight**: These are exactly the discontinuities where the server's time reference or player position teleports. Forgetting any one causes stale offsets that corrupt interpolation. Since spec 2, death is server-authoritative only — the client respawns on receiving `PlayerDied` for its own id via `respawn_local`; there is no client-initiated death path to keep in sync.
 
 ### Phase 2f: Netcode Synchronization & Frame Alignment (2026-11-25)
 

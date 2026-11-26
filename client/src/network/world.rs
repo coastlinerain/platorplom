@@ -295,9 +295,8 @@ pub fn send_join_req(network: &mut dyn PacketIO) {
     network.send(join_msg);
 }
 
-// NOTE (tester, spec 2 — authoritative player death): these tests compile
-// against the planned `GamePacket::PlayerDied` handler and
-// `client::world::lib::respawn_local`; they are RED until Boxes 1 + 5 land.
+// Spec 2 (authoritative player death) — PlayerDied handler tests. See plan
+// Boxes 1 + 5 for the API these exercise.
 #[cfg(test)]
 mod tests {
     use super::handle_packet;
