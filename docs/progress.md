@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-25 (windowless-headless refactor COMPLETE — 3 boxes done, both feature-gated binaries build; `cargo test --workspace` green WITHOUT Xvfb; CI drops Xvfb)
+> Last updated: 2026-11-26 (remove-pve-enemies refactor COMPLETE — PvE Enemy machinery removed end-to-end + enemy_bullets→remote_bullets rename; 178 tests green; subagents pinned to flash + CI token-optimization)
 
 ## Current status
 
@@ -96,12 +96,26 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] `cargo clippy --all-targets --all-features --workspace -- -D warnings` clean; `cargo fmt --check --all` clean
 - [ ] Manual smoke: `cargo run --bin metroidvania-rust` opens the window (needs a display; binary compiles, not automatable here)
 
+## Remove PvE enemies checklist — refactor (`refactor/remove-pve-enemies`)
+- [x] Spec written (`docs/specs/remove-pve-enemies.md`)
+- [x] Plan review passed (SEND-BACK → 2 MAJOR + 4 MINOR fixed)
+- [x] PvE `Enemy` machinery removed end-to-end (protocol/server/game/client/e2e)
+- [x] `enemy_bullets` → `remote_bullets` (+ `update_remote_bullets_position`) rename
+- [x] `enemy.rs`, `room_load.rs`, `enemy_death.rs` deleted
+- [x] Code review APPROVE-WITH-MINOR (5 doc/process MINORs fixed)
+- [x] 178 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
+
 ## Next actions (top = do first)
 
-1. **Push/PR (owner merges)** — windowless-headless refactor is complete (3 boxes,
-   all gates green WITHOUT Xvfb). Push `refactor/windowless-headless` + open PR
-   to `dev`; owner merges.
-2. **Phase 2h follow-ups (deferred)**:
+1. **Push/PR (owner merges)** — remove-pve-enemies (spec 1) is complete (178 tests
+   green). Push `refactor/remove-pve-enemies` + open PR to `dev`; owner merges.
+   NOTE: the branch also carries two unrelated config commits (`64470e5` agent
+   model pin, `00215d2` CI token config) — decide whether to keep them in this PR
+   or split them onto their own branch first.
+2. **Spec 2 — `feat/authoritative-player-death`** (next, top priority) — re-add
+   server-authoritative PvP hit detection (raycast vs players, `PlayerDied`).
+   Shooting is inert until this lands.
+3. **Phase 2h follow-ups (deferred)**:
    - M2 — laminar poller thread + UDP socket leak on Leave/Retry/quit (needs a
      transport `Drop` that drains-then-stops + joins, plus a real-socket check).
    - `.expect()` restructure in `App::enter_playing_from_join` (pass `assigned_id`
@@ -111,16 +125,16 @@ Working memory for the project. **Update this at the end of every task.**
      clock-reset if wanted.
    - Paused-screen remote-animation wording (remote snapshots keep updating while
      paused; "rendering stays frozen" is slightly imprecise).
-3. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
+4. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
    render position (QA m5); (c) snap `prev_player_*` after reconciliation (QA n3).
-4. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
-5. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+5. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
+6. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English.
-6. **Follow-up: netcode smoothness review** — owner wants a seamless online
+7. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
-7. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
+8. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
    - Collapse `RealPacketIO`/`HeadlessPacketIO` (now byte-identical in
      `transport.rs`; decide whether the transport-level `headless` bool survives).
    - Convert `.unwrap()` in lib code (`transport.rs` bind/`to_allocvec`,
@@ -221,3 +235,15 @@ Working memory for the project. **Update this at the end of every task.**
   definitions are gone; only the call site remains). Manual smoke T13
   (`cargo run --bin metroidvania-rust` opens a window) is deferred to the owner
   (needs a display); the binary compiles under `--all-targets --all-features`.
+- (remove-pve-enemies complete) Spec 1 landed on `refactor/remove-pve-enemies`
+  (code `c58724e`, docs `a6b7b61`, deletions `5842b9f`). PvE `Enemy` machinery
+  removed end-to-end (protocol `EnemyDied`/`EnemyState*`; server `EnemyState`/
+  `EnemyDiedInfo`/`enemies`/`raycast_hit`; client `World.enemies` + RNG loop +
+  draw; e2e PvE tests). `enemy_bullets` → `remote_bullets`. 178 passed / 3
+  ignored; fmt + clippy clean; grep clean. Code review APPROVE-WITH-MINOR (5 doc
+  MINORs fixed). "Shoot hits nothing" is accepted until spec 2.
+- **Token optimization (owner-driven)**: all 7 subagents pinned to
+  `opencode-go/deepseek-v4.1-flash` (standard variant); `docs/progress.md` removed
+  from auto-load; pre-commit quiet on success + skips `cargo test` on docs-only
+  commits. Commits `64470e5` + `00215d2` live on the remove-pve-enemies branch —
+  branch-scope decision pending (Next actions #1).

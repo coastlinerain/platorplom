@@ -1,6 +1,6 @@
 # Remove PvE enemies
 
-- Status: draft
+- Status: implemented
 - Date: 2026-11-26
 - Branch: `refactor/remove-pve-enemies`
 

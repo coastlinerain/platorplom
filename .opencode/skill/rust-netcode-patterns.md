@@ -61,7 +61,7 @@ pub fn apply_input(&mut self, id: u8, x: u8, y: u8, input: PlayerInput, seq: u16
     }
 }
 
-pub fn update(&mut self, dt: f32) -> (Vec<BulletSpawnInfo>, Vec<EnemyDiedInfo>) {
+pub fn update(&mut self, dt: f32) -> Vec<BulletSpawnInfo> {
     // Clear latched edges after consuming
     pending.jump = false;
     if pending.shoot && cooldown == 0 {

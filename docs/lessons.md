@@ -40,9 +40,11 @@ Running journal of Rust concepts encountered while building Rustvania.
   is a dev-dependency of `protocol`, so the normal build stays lean (only `serde`).
 - **`pub(crate)` visibility** — lets a sibling module (`world::game`) call a
   function in `world::lib` without exposing it publicly.
-- **borrow-before-move** — in `World::new`, compute `enemies_from_data(&levels[0][0].data)`
-  into an owned `Vec<Enemy>` BEFORE moving `levels` into the struct literal, so the
-  borrow ends before the move.
+- **borrow-before-move** *(historical — example removed with the PvE `Enemy`
+  machinery)* — compute a borrow of a value into an owned result BEFORE moving the
+  borrowed value into a struct literal, so the borrow ends before the move. (The
+  original example was `enemies_from_data(&levels[0][0].data)` into an owned
+  `Vec<Enemy>` before moving `levels`; that enemy-spawn call no longer exists.)
 
 ## Phase 2a (2026-11-23) — extract the `game` core crate
 
@@ -56,9 +58,11 @@ Running journal of Rust concepts encountered while building Rustvania.
   `move_left`/`move_right`, edge-triggered `jump`/`shoot`) and passes it in. The
   simulation crate then has no idea where inputs come from — essential for 2b,
   where the *server* will feed it inputs from the network.
-- **Injected randomness** — `Enemy::update(dt, level, random: u32)` takes the
-  random draw as a parameter rather than calling `macroquad::rand` itself. Keeps
-  the simulation deterministic and macroquad-free; the client supplies the draw.
+- **Injected randomness** *(historical — `Enemy` removed in the PvE-enemy refactor)* — a
+  sim function takes the random draw as a parameter rather than calling
+  `macroquad::rand` itself, keeping the simulation deterministic and macroquad-free;
+  the caller supplies the draw. (The example was `Enemy::update(dt, level, random:
+  u32)`, since deleted.)
 - **Cross-crate type identity** — `macroquad::Vec2` *is* `glam::Vec2` (macroquad
   re-exports it). So a `game` struct field of type `glam::Vec2` interoperates with
   the client's `vec2(...)` calls with **no conversion** — no `into()`, no
@@ -552,3 +556,23 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `client/src/main.rs`.
 - **What it is**: After removing the `--headless` branch, `main.rs` no longer *names* `TransportFactory` (it only writes `let factory = make_transport_factory(...)` and `App::new(factory, ...)`), nor `PacketIO`, `game::config::*`, or `Duration`. Keeping those imports is a `clippy::unused_imports` error under `-D warnings`, so they must be deleted alongside the code they served.
 - **Gotcha / insight**: a re-exported function (`make_transport_factory`) is used by its *call*, so the import stays; a *type* like `TransportFactory` is only "used" if you write its name in a signature or annotation. Type inference through `let factory = ...` means the type never appears in the source, so importing it is always a lint failure.
+
+## Refactor: remove PvE enemies (2026-11-26)
+
+### Deleting an enum variant forces every `match` to shrink (2026-11-26)
+
+- **Where**: `protocol/src/lib.rs` (`GamePacket`), `server/src/main.rs` + `client/src/network/logging.rs` (`packet_type_name`/`packet_id`/`packet_key_fields`), `client/src/network/world.rs` (`handle_packet`).
+- **What it is**: Removing `GamePacket::{EnemyDied, EnemyStateRequest, EnemyStateResponse}` makes every exhaustive `match` on `GamePacket` a compile error until its stale arms are deleted. The compiler is the checklist: if any arm (or `#[cfg(test)]` fixture) still constructs a removed variant, the build fails at exactly that line.
+- **Gotcha / insight**: non-exhaustive helpers with a `_ => None` catch-all (like `packet_id`) have *no* arm to delete for most variants — only the variants that had a specific arm (`EnemyDied`) need removing. "Grep for the token" and "let the compiler fail" are complementary: grep finds the dead references the compiler can't (comments, doc text), the compiler finds the dead code grep can't (a variant name reconstructed across a match).
+
+### A `pub mod` line is the compile boundary, not the file (2026-11-26)
+
+- **Where**: `game/src/entities/mod.rs` (`pub mod enemy;`), `game/src/entities/enemy.rs`.
+- **What it is**: Rust only compiles files reachable from the module tree. Deleting `pub mod enemy;` from `mod.rs` orphans `enemy.rs` — the file still exists on disk but is never compiled, so its contents can be emptied (or left) without breaking the build. Actual deletion is a filesystem op, orthogonal to compilation.
+- **Gotcha / insight**: integration-test files (`tests/*.rs`) are the opposite — Cargo auto-discovers every `.rs` in `tests/`, so they *are* compiled regardless of any `mod`. Emptying an integration test file's contents (rather than deleting it) is what keeps the build green when `rm` isn't available.
+
+### Changing a return type from a tuple to a single value surfaces every call site (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`ServerWorld::update`), callers in `server/src/main.rs`, `e2e/src/harness.rs`, and 6 `#[test]` sites.
+- **What it is**: `update` went from `-> (Vec<BulletSpawnInfo>, Vec<EnemyDiedInfo>)` to `-> Vec<BulletSpawnInfo>`. Every `let (shots, deaths) = world.update(...)` destructuring is now a type error, so the compiler enumerates every consumer that must change — including the `mod tests` block and the *second*, top-level `#[test]` region the editor might miss by eye.
+- **Gotcha / insight**: a signature change is a cheap, precise "find all callers". Prefer it over grep when the thing you're removing flows through a return value — the type system won't let you forget a call site.
