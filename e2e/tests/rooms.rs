@@ -81,10 +81,12 @@ fn b4_transition_up_changes_coords() {
     h.tick_n(15);
     assert_eq!(h.client_player_coords(p0).1, 1);
 
-    // Leave the entry band (re-arm) and wait out the server cooldown.
+    // Leave the entry band (re-arm) and wait out the server cooldown. Four
+    // extra ticks of margin let the body settle firmly grounded so the
+    // grounded-gated re-arm definitely fires before the jump.
     h.set_server_player_pos(p0, 300.0, 100.0);
     h.set_client_player_pos(p0, 300.0, 100.0);
-    h.tick_n(12);
+    h.tick_n(16);
 
     // Now jump up.
     h.set_server_player_pos(p0, 300.0, 10.0);
@@ -200,10 +202,11 @@ fn b8_not_stuck_after_up_transition() {
     h.tick_n(15);
     assert_eq!(h.client_player_coords(p0).1, 1);
 
-    // Reposition in room (0,1) then jump up back to (0,0).
+    // Reposition in room (0,1) then jump up back to (0,0). The extra settle
+    // ticks keep the body firmly grounded so the grounded-gated re-arm fires.
     h.set_server_player_pos(p0, 300.0, 100.0);
     h.set_client_player_pos(p0, 300.0, 100.0);
-    h.tick_n(12);
+    h.tick_n(16);
 
     // Jump up to transition back to room (0,0).
     h.set_server_player_pos(p0, 300.0, 10.0);

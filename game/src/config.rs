@@ -35,9 +35,10 @@ pub const CONNECT_TIMEOUT_MS: u64 = 5000;
 /// Disconnect watchdog: fire `ConnectionLost` if no `PlayerPos` for this long.
 pub const DISCONNECT_TIMEOUT_MS: u64 = 1000;
 
-/// Server: minimum ticks between accepted room changes for one player.
-/// ~200 ms at 60 Hz. Tunable if door ping-pong becomes a real problem.
-pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 12;
+/// Server: minimum ticks between room-change responses for one player (an
+/// accepted change or a rejection arms it). ~100 ms at 60 Hz. Tunable if door
+/// ping-pong becomes a real problem.
+pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 6;
 
 /// Client: ticks to wait after a rejected request before retrying.
 pub const ROOM_CHANGE_RETRY_TICKS: u8 = 6;

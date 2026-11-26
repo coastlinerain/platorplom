@@ -119,10 +119,12 @@ impl ServerWorld {
 
     /// Validates and applies a client room-change request.
     ///
-    /// Returns `None` only for an unknown player (no state, no response). A
-    /// rejection returns `Some` with the unchanged authoritative room/position
-    /// and mutates nothing; an acceptance teleports to the door's canonical
-    /// entry and arms the per-player cooldown.
+    /// Returns `None` only for an unknown player (no state, no response) or
+    /// while the per-player cooldown is active (the request is silently
+    /// dropped, so a client gets at most one response per window). A rejection
+    /// returns `Some` with the unchanged authoritative room/position, mutates
+    /// nothing, and arms the cooldown; an acceptance teleports to the door's
+    /// canonical entry and arms the cooldown too.
     pub fn apply_room_change(&mut self, id: u8, direction: Direction) -> Option<RoomChangeInfo> {
         let from = self.coords.get(&id).copied().unwrap_or((0, 0));
 
@@ -141,14 +143,17 @@ impl ServerWorld {
         };
         let current_pos = (player_rect.x, player_rect.y);
 
-        // Cooldown: rate-limit an accepted change so a modified client cannot
-        // ping-pong its room at packet rate.
+        // Cooldown: rate-limit every response so a modified client cannot
+        // ping-pong its room (or farm rejections) at packet rate.
         if self.room_change_cooldown.get(&id).copied().unwrap_or(0) > 0 {
-            return Some(rejection(from, current_pos));
+            return None;
         }
 
         // Connectivity + authoritative position-at-door.
         if !self.room_graph.can_enter(from, direction, player_rect) {
+            // A rejection is one response for this window: arm before replying.
+            self.room_change_cooldown
+                .insert(id, ROOM_CHANGE_COOLDOWN_TICKS);
             return Some(rejection(from, current_pos));
         }
 

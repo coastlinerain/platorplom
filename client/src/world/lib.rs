@@ -77,6 +77,10 @@ fn load_current_level(world: &mut World) {
 ///
 /// It never mutates `current_coords` or teleports; the server's ack (or an own
 /// `PlayerPos` that arrives first) applies the authoritative room.
+///
+/// Detection re-arms only when the body is **grounded** and outside every
+/// trigger band. A jump that leaves a band mid-air must not re-arm, or landing
+/// back in the entry band would request an immediate bounce-back transition.
 pub fn request_room_change(world: &mut World) {
     let Some(id) = world.id else {
         return;
@@ -103,8 +107,14 @@ pub fn request_room_change(world: &mut World) {
     // Detection uses the raw geometric trigger, never the server's
     // lead-expanded validation rect.
     match world.room_graph.door_at(world.current_room(), rect) {
-        // Left every trigger band: safe to detect again.
-        None => world.room_change_armed = true,
+        // Left every trigger band while grounded: safe to detect again. An
+        // airborne exit (a jump) must not re-arm, or landing in the entry band
+        // would bounce straight back.
+        None => {
+            if world.player.grounded {
+                world.room_change_armed = true;
+            }
+        }
         // Still inside the entry band of the door just used: no bounce.
         Some(_) if !world.room_change_armed => {}
         Some(door) => {
@@ -123,7 +133,19 @@ pub fn request_room_change(world: &mut World) {
 /// Idempotent: applying the same state twice is harmless. Clears the
 /// unacknowledged input buffer so old-room inputs are not replayed into the new
 /// room, and `load_current_level` resets bullets/clock/sticky edges.
+///
+/// An out-of-bounds `room` is ignored entirely (no mutation), so a bogus server
+/// value cannot index-panic the next frame's level lookup.
 pub fn apply_room_change_local(world: &mut World, room: RoomCoords, pos: glam::Vec2) {
+    let in_bounds = world
+        .levels_matrix
+        .get(room.1 as usize)
+        .and_then(|row| row.get(room.0 as usize))
+        .is_some();
+    if !in_bounds {
+        return;
+    }
+
     world.current_coords = (room.0 as usize, room.1 as usize);
     world.player.pos = pos;
     world.player.vel = glam::Vec2::ZERO;
