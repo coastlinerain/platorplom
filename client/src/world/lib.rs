@@ -257,8 +257,11 @@ mod tests {
         assert!(sends.0.borrow().is_empty());
         assert!(!world.room_change_armed);
 
-        // Away from every band: re-armed, still no send.
+        // Away from every band and on the ground: re-armed, still no send.
+        // The re-arm is gated on `grounded` (Fix 1), so a test that changed
+        // only the position would stay disarmed.
         world.player.pos = Vec2::new(100.0, 320.0);
+        world.player.grounded = true;
         request_room_change(&mut world);
         assert!(sends.0.borrow().is_empty());
         assert!(world.room_change_armed);
@@ -274,6 +277,61 @@ mod tests {
             }]
         );
         assert_eq!(world.pending_room_change, Some(Direction::West));
+    }
+
+    /// C12 (Fix 1) — a jump must not re-arm mid-air: leaving every door band
+    /// while airborne keeps `room_change_armed` false, so landing back in the
+    /// entry band sends no bounce-back request. Only a grounded exit re-arms.
+    #[test]
+    fn room_change_does_not_rearm_while_airborne() {
+        let (mut world, sends) = make_world();
+        world.id = Some(1);
+        world.current_coords = (0, 0);
+        world.pending_room_change = None;
+        world.room_change_armed = false;
+
+        // Inside the (0,0) South band (the (0,1) North-door entry).
+        world.player.pos = Vec2::new(305.0, 432.0);
+        world.player.grounded = false;
+        request_room_change(&mut world);
+        assert!(sends.0.borrow().is_empty());
+        assert!(!world.room_change_armed);
+
+        // Airborne and outside every band: must NOT re-arm.
+        world.player.pos = Vec2::new(100.0, 200.0);
+        world.player.grounded = false;
+        request_room_change(&mut world);
+        assert!(sends.0.borrow().is_empty());
+        assert!(
+            !world.room_change_armed,
+            "a jump must not re-arm the door detector mid-air"
+        );
+
+        // Grounded and outside every band: re-armed, still no send.
+        world.player.grounded = true;
+        request_room_change(&mut world);
+        assert!(sends.0.borrow().is_empty());
+        assert!(world.room_change_armed);
+    }
+
+    /// C13 (Fix 2) — an out-of-bounds room from the server is ignored: no
+    /// `current_coords` mutation (and therefore no index panic on the next
+    /// frame), and the predicted body is left alone.
+    #[test]
+    fn apply_room_change_local_ignores_out_of_range_room() {
+        let (mut world, _sends) = make_world();
+        world.id = Some(1);
+        world.current_coords = (0, 0);
+        world.player.pos = Vec2::new(500.0, 300.0);
+
+        apply_room_change_local(&mut world, (99, 99), Vec2::new(10.0, 10.0));
+
+        assert_eq!(
+            world.current_coords,
+            (0, 0),
+            "an out-of-bounds room must not be adopted"
+        );
+        assert_eq!(world.player.pos, Vec2::new(500.0, 300.0));
     }
 
     /// C5 — accepting a room change sets the room/entry, zeroes velocity,

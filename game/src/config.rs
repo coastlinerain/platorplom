@@ -59,4 +59,12 @@ mod tests {
         assert_eq!(MAX_ACCUMULATED_FRAMES, 5);
         assert_eq!(HEADLESS_BUSY_WAIT_MS, 1);
     }
+
+    /// Spec 3 fix (m2): the room-change cooldown is deliberately short (~100 ms
+    /// at 60 Hz) so an honest client can reverse quickly while a modified one
+    /// still gets at most one `RoomChangeResponse` per window.
+    #[test]
+    fn room_change_cooldown_is_six_ticks() {
+        assert_eq!(ROOM_CHANGE_COOLDOWN_TICKS, 6);
+    }
 }

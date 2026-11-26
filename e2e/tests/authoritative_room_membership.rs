@@ -12,6 +12,7 @@
 // file is expected to be RED (compile error) until then.
 
 use e2e::harness::{ClientHandle, TestHarness};
+use game::config::ROOM_CHANGE_COOLDOWN_TICKS;
 use game::room_graph::Direction;
 use metroidvania_server::PlayerHitInfo;
 use protocol::GamePacket;
@@ -95,7 +96,8 @@ fn e2e_valid_door_transition_changes_room_once() {
 
 /// E2 — direct requests for non-doors are rejected: the room does not change,
 /// and the client snaps back to the server's authoritative position. Each
-/// request gets exactly one response (per-requester routing).
+/// request gets exactly one response (per-requester routing) when it falls
+/// outside the previous one's cooldown window.
 #[test]
 fn e2e_non_door_teleport_is_rejected() {
     let mut h = TestHarness::new();
@@ -103,7 +105,15 @@ fn e2e_non_door_teleport_is_rejected() {
     place(&mut h, p0, (0, 0), (300.0, 200.0));
 
     let id = h.client(p0).player_id;
-    for direction in [Direction::North, Direction::West, Direction::East] {
+    for (i, direction) in [Direction::North, Direction::West, Direction::East]
+        .into_iter()
+        .enumerate()
+    {
+        // A rejection now arms the cooldown (one response per window), so the
+        // next direct request must wait it out or it would be dropped.
+        if i > 0 {
+            h.tick_n(u32::from(ROOM_CHANGE_COOLDOWN_TICKS));
+        }
         h.client_mut(p0)
             .world
             .network
@@ -125,8 +135,10 @@ fn e2e_non_door_teleport_is_rejected() {
     assert_eq!(h.room_change_responses(p0), 3);
 }
 
-/// E3 — a victim cannot dodge death by claiming a room: the spoofed requests
-/// are rejected and answered only to the victim, and the shooter still kills it.
+/// E3 — a victim cannot dodge death by claiming a room: the spoofed request is
+/// rejected and answered only to the victim, and the shooter still kills it.
+/// A second request in the same tick is rate-limited away (`None`, no
+/// response), so the rejection also arms the cooldown window.
 #[test]
 fn e2e_spoofed_room_cannot_dodge_death() {
     let mut h = TestHarness::new();
@@ -135,7 +147,8 @@ fn e2e_spoofed_room_cannot_dodge_death() {
     let shooter_id = h.client(shooter).player_id;
     let victim_id = h.client(victim).player_id;
 
-    // Two malicious requests, neither at a door.
+    // Two malicious requests, neither at a door. The first is answered; the
+    // second falls inside the rejection's cooldown window and is dropped.
     h.client_mut(victim)
         .world
         .network
@@ -156,9 +169,9 @@ fn e2e_spoofed_room_cannot_dodge_death() {
     assert_eq!(h.client_player_coords(victim), (0, 0));
 
     // Per-requester routing: a broadcast would answer the shooter too.
-    assert_eq!(h.room_change_responses(victim), 2);
+    assert_eq!(h.room_change_responses(victim), 1);
     assert_eq!(h.room_change_responses(shooter), 0);
-    assert_eq!(h.client_room_change_rejects, 2);
+    assert_eq!(h.client_room_change_rejects, 1);
 
     // The victim is never unkillable.
     h.press_shoot(shooter);
@@ -282,4 +295,93 @@ fn e2e_walk_in_first_request_accepted() {
     }
     assert_eq!(h.client_player_coords(p0), (1, 0));
     assert_eq!(h.server_player_coords(p0), (1, 0));
+}
+
+/// E7 (Fix 1) — a jump right after a room change must not re-arm the door
+/// detector mid-air, so no bounce-back request is sent.
+///
+/// Choreography note: the canonical entries sit inside the reverse door's
+/// one-tile band. The `(0,0)` North-door entry `(305, 432)` is capped by the
+/// row-9 ceiling 32 px above it, so even a full jump keeps the body overlapping
+/// the 40 px South band and `door_at` never returns `None` — the buggy re-arm
+/// is unreachable there. The reverse entry `(305, 10)` in `(0,1)` has the top
+/// opening above it, so the jump genuinely clears the band; the old code then
+/// re-arms mid-air and fires a North request on the way down (it is rejected
+/// by the server's one-tick lead, but the spurious request is observable).
+#[test]
+fn e2e_jump_after_enter_does_not_bounce_back() {
+    let mut h = TestHarness::new();
+    let p0 = h.connect_client();
+    h.tick_n(1);
+
+    // Just entered (0,1) from above: the canonical South-door entry sits
+    // inside the reverse (North) band, so the client starts disarmed.
+    place(&mut h, p0, (0, 1), (305.0, 10.0));
+    // Let the client adopt the authoritative room from its own `PlayerPos`
+    // (the first broadcast still carries the pre-placed seq and is ignored).
+    h.tick_n(2);
+    assert_eq!(h.client_player_coords(p0), (0, 1));
+
+    // "Just entered": disarmed inside the reverse (North) band; the jump needs
+    // a grounded body on both sides.
+    h.client_mut(p0).world.room_change_armed = false;
+    h.set_server_player_grounded(p0, true);
+    h.client_mut(p0).world.player.grounded = true;
+
+    h.press_jump(p0);
+    for tick in 0..130 {
+        h.tick();
+        let coords = h.client_player_coords(p0);
+        assert_eq!(
+            coords,
+            (0, 1),
+            "a jump after entering must not bounce the client back to (0,0) (tick {tick})"
+        );
+        assert_eq!(
+            h.client_room_change_requests, 0,
+            "a jump must not re-arm the door detector and request a room change (tick {tick})"
+        );
+    }
+}
+
+/// E8 (Fix 1) — leaving the South entry band and walking back into it must
+/// still transition: the grounded re-arm gate must not brick the door.
+#[test]
+fn e2e_jump_out_and_back_into_door_still_works() {
+    let mut h = TestHarness::new();
+    let p0 = h.connect_client();
+    h.tick_n(1);
+
+    // Just entered (0,0) from (0,1): disarmed inside the South band.
+    place(&mut h, p0, (0, 0), (305.0, 432.0));
+    h.client_mut(p0).world.room_change_armed = false;
+
+    // The (0,0) entry itself is a pit walled off at row 11, so stage both
+    // sides on the adjacent floor to leave the band on the ground.
+    h.set_server_player_pos(p0, 200.0, 401.0);
+    h.set_client_player_pos(p0, 200.0, 401.0);
+    h.set_server_player_grounded(p0, true);
+    h.client_mut(p0).world.player.grounded = true;
+    h.tick_n(3);
+    assert!(
+        h.client_mut(p0).world.room_change_armed,
+        "leaving the band on the ground must re-arm the door detector"
+    );
+
+    // Walk right off the ledge and drop back into the South hole.
+    h.hold_right(p0, 40);
+    let mut transitioned = false;
+    for _ in 0..60 {
+        h.tick();
+        if h.client_player_coords(p0) == (0, 1) {
+            transitioned = true;
+            break;
+        }
+    }
+    h.release_all(p0);
+
+    assert!(
+        transitioned,
+        "walking back into the South hole must still transition to (0,1)"
+    );
 }

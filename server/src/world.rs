@@ -1117,7 +1117,10 @@ mod room_change_tests {
         assert_eq!(world.coords()[&1], (0, 0));
     }
 
-    /// S4 — directions with no door are rejected, twice in a row, without state.
+    /// S4 — directions with no door are rejected, twice, without state. A
+    /// rejection now arms the cooldown (Fix 3+4), so the second request is
+    /// spaced past it; the player is re-staged to keep the position assertion
+    /// exact.
     #[test]
     fn apply_room_change_rejects_no_door() {
         let mut world = ServerWorld::new();
@@ -1128,10 +1131,16 @@ mod room_change_tests {
             assert!(!info.accepted);
             assert_eq!(info.room, (0, 0));
             assert_eq!(info.pos, (100.0, 100.0));
-        }
+            assert_eq!(world.coords()[&1], (0, 0));
+            assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 100.0));
 
-        assert_eq!(world.coords()[&1], (0, 0));
-        assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 100.0));
+            // A rejection arms the cooldown; let it expire and undo the
+            // gravity drift before the next direction.
+            for _ in 0..ROOM_CHANGE_COOLDOWN_TICKS {
+                world.update(tick());
+            }
+            world.players.get_mut(&1).expect("placed").pos = Vec2::new(100.0, 100.0);
+        }
     }
 
     /// S5 — a real door requested from the middle of the room is rejected.
@@ -1147,8 +1156,10 @@ mod room_change_tests {
         assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 200.0));
     }
 
-    /// S6 — the cooldown rejects an immediate reverse request; once it expires
-    /// the same request is accepted (the entry overlaps the reverse band).
+    /// S6 — while the cooldown is active a request is *silently dropped*
+    /// (`None`, no response), so a client gets at most one
+    /// `RoomChangeResponse` per window; once it expires the reverse request is
+    /// accepted (the entry overlaps the reverse band).
     #[test]
     fn apply_room_change_rejects_during_cooldown() {
         let mut world = ServerWorld::new();
@@ -1157,10 +1168,11 @@ mod room_change_tests {
         let first = world.apply_room_change(1, Direction::East).unwrap();
         assert!(first.accepted);
 
-        let blocked = world.apply_room_change(1, Direction::West).unwrap();
-        assert!(!blocked.accepted);
-        assert_eq!(blocked.room, (1, 0));
-        assert_eq!(blocked.pos, (10.0, 321.0));
+        assert_eq!(
+            world.apply_room_change(1, Direction::West),
+            None,
+            "the cooldown must drop the request without answering it"
+        );
 
         for _ in 0..ROOM_CHANGE_COOLDOWN_TICKS {
             world.update(tick());
@@ -1283,7 +1295,8 @@ mod room_change_tests {
     }
 
     /// S11 — a victim cannot hide from a raycast by claiming another room; the
-    /// rejected request leaves it in the shooter's room.
+    /// first claim is rejected (which arms the cooldown) and the follow-up is
+    /// dropped, leaving it in the shooter's room.
     #[test]
     fn raycast_victim_cannot_hide_by_room_claim() {
         let mut world = ServerWorld::new();
@@ -1296,12 +1309,9 @@ mod room_change_tests {
                 .unwrap()
                 .accepted
         );
-        assert!(
-            !world
-                .apply_room_change(2, Direction::South)
-                .unwrap()
-                .accepted
-        );
+        // The rejection arms the cooldown: the next request is dropped without
+        // a response (and still changes nothing).
+        assert_eq!(world.apply_room_change(2, Direction::South), None);
         assert_eq!(world.coords()[&2], (0, 0));
 
         assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), Some((2, 400.0)));
@@ -1337,5 +1347,34 @@ mod room_change_tests {
 
         assert!(world.players()[&0].pos.x > 100.0);
         assert_eq!(world.coords()[&0], (255, 255));
+    }
+
+    /// S14 — rejections are rate-limited too: the first off-trigger request is
+    /// answered, a second one inside the cooldown is silently dropped (no
+    /// response), and the window reopens after `ROOM_CHANGE_COOLDOWN_TICKS`.
+    #[test]
+    fn apply_room_change_rate_limits_rejections() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 200.0, 1.0);
+
+        let first = world.apply_room_change(1, Direction::North).unwrap();
+        assert!(!first.accepted);
+        assert_eq!(first.room, (0, 0));
+        assert_eq!(first.pos, (100.0, 200.0));
+
+        assert_eq!(
+            world.apply_room_change(1, Direction::North),
+            None,
+            "a rejection must arm the cooldown: one response per window"
+        );
+
+        for _ in 0..ROOM_CHANGE_COOLDOWN_TICKS {
+            world.update(tick());
+        }
+
+        let again = world.apply_room_change(1, Direction::North).unwrap();
+        assert!(!again.accepted);
+        assert_eq!(again.room, (0, 0));
+        assert_eq!(world.coords()[&1], (0, 0));
     }
 }
