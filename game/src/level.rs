@@ -63,6 +63,35 @@ impl Level {
         self.solid_in_rect(chequeo_suelo)
     }
 
+    /// True if any `TileType::Wall` tile blocks the horizontal segment from
+    /// `x0` to `x1` (order-insensitive) at height `y`.
+    ///
+    /// Scans only the single tile row containing the ray: `solid_in_rect` walks
+    /// every overlapping row, so a 1-px-high ray on a tile boundary would see
+    /// the row below and falsely block. Out-of-grid rows and columns are not
+    /// solid, matching `solid_in_rect`.
+    pub fn solid_between(&self, x0: f32, x1: f32, y: f32) -> bool {
+        let gy = (y / TILE_SIZE).floor() as i32;
+        if gy < 0 || gy >= self.height as i32 {
+            return false;
+        }
+
+        let x_min = x0.min(x1);
+        let x_max = x0.max(x1);
+        let gx_start = (x_min / TILE_SIZE).floor() as i32;
+        let gx_end = (x_max / TILE_SIZE).floor() as i32;
+
+        for gx in gx_start..=gx_end {
+            if gx >= 0
+                && gx < self.width as i32
+                && self.grid[gy as usize][gx as usize] == TileType::Wall
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn solid_in_rect(&self, r: Rect) -> bool {
         let x_start = (r.x / TILE_SIZE).floor() as i32;
         let x_end = ((r.x + r.w) / TILE_SIZE).floor() as i32;

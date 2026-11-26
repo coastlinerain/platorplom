@@ -313,7 +313,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 2 — `Level::solid_between` + unit tests
 
-- [ ] done
+- [x] done
 - **Files**: `game/src/level.rs`.
 - **Change**:
   - Add inside `impl Level`, directly after `solid_in_rect`:
@@ -337,10 +337,17 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   spans rows 2 and 3).
 - **Test**: G1–G5.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Added `Level::solid_between(x0, x1, y)` after `solid_in_rect`: it
+    floors the ray height to one tile row and scans the inclusive column range
+    between the two x endpoints (order-insensitive), ignoring out-of-grid
+    columns.
+  - Why: Server hit detection needs wall occlusion for a 1-px-high ray; the
+    existing `solid_in_rect` walks every overlapping row, so a ray on a tile
+    boundary would be blocked by the row below (G3 pins this regression).
+  - Rust concepts: `f32::min`/`max` for order-insensitivity, `floor() as i32`,
+    inclusive range iteration (`..=`), slice indexing with bounds checks.
+  - Watch out: `TILE_SIZE` is 40, so `y = 119` is row 2, not row 2–3; out-of-grid
+    rows/columns return `false` (not solid), unlike the private `solid_point`.
 
 ### Box 3 — `ServerWorld`: `PlayerHitInfo`, `raycast_player`, `respawn`, new `update`
 
