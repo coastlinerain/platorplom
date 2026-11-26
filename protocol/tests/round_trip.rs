@@ -1,3 +1,4 @@
+use game::room_graph::Direction;
 use protocol::GamePacket;
 use std::process::Command;
 
@@ -71,8 +72,6 @@ fn round_trip_player_died() {
 fn round_trip_player_input() {
     round_trip(GamePacket::PlayerInput {
         id: 7,
-        level_x: 1,
-        level_y: 2,
         move_left: true,
         move_right: false,
         jump: true,
@@ -81,8 +80,6 @@ fn round_trip_player_input() {
     });
     round_trip(GamePacket::PlayerInput {
         id: 0,
-        level_x: 0,
-        level_y: 0,
         move_left: false,
         move_right: false,
         jump: false,
@@ -91,8 +88,6 @@ fn round_trip_player_input() {
     });
     round_trip(GamePacket::PlayerInput {
         id: 255,
-        level_x: 255,
-        level_y: 255,
         move_left: true,
         move_right: true,
         jump: true,
@@ -106,8 +101,6 @@ fn round_trip_player_input() {
 fn round_trip_player_input_seq() {
     round_trip(GamePacket::PlayerInput {
         id: 7,
-        level_x: 1,
-        level_y: 2,
         move_left: true,
         move_right: false,
         jump: true,
@@ -116,8 +109,6 @@ fn round_trip_player_input_seq() {
     });
     round_trip(GamePacket::PlayerInput {
         id: 0,
-        level_x: 0,
-        level_y: 0,
         move_left: false,
         move_right: false,
         jump: false,
@@ -126,8 +117,6 @@ fn round_trip_player_input_seq() {
     });
     round_trip(GamePacket::PlayerInput {
         id: 255,
-        level_x: 255,
-        level_y: 255,
         move_left: true,
         move_right: true,
         jump: true,
@@ -141,8 +130,6 @@ fn round_trip_player_input_seq() {
 fn round_trip_player_input_seq_wraparound() {
     let pkt = GamePacket::PlayerInput {
         id: 1,
-        level_x: 0,
-        level_y: 0,
         move_left: false,
         move_right: true,
         jump: false,
@@ -203,29 +190,75 @@ fn action_variant_removed() {
     // The actual verification is that the code compiles without Action.
 }
 
-/// AC 4 — `protocol/Cargo.toml` declares no dependency on `game` or `glam`.
+/// P3 — `RequestRoomChange` round-trips for all four `Direction` variants and
+/// the boundary ids 0 / 255.
 #[test]
-fn test_no_game_or_glam_deps() {
+fn round_trip_request_room_change() {
+    for direction in [
+        Direction::North,
+        Direction::South,
+        Direction::East,
+        Direction::West,
+    ] {
+        for id in [0u8, 255u8] {
+            round_trip(GamePacket::RequestRoomChange { id, direction });
+        }
+    }
+}
+
+/// P4 — `RoomChangeResponse` round-trips for an accepted and a rejected ack,
+/// plus boundary room/position values.
+#[test]
+fn round_trip_room_change_response() {
+    round_trip(GamePacket::RoomChangeResponse {
+        accepted: true,
+        level_x: 1,
+        level_y: 0,
+        x: 10.0,
+        y: 321.0,
+    });
+    round_trip(GamePacket::RoomChangeResponse {
+        accepted: false,
+        level_x: 0,
+        level_y: 0,
+        x: 760.0,
+        y: 321.0,
+    });
+    round_trip(GamePacket::RoomChangeResponse {
+        accepted: true,
+        level_x: 255,
+        level_y: 255,
+        x: -1.5,
+        y: 432.25,
+    });
+}
+
+/// P5 — `protocol` now depends on `game` (for the shared `Direction`) but still
+/// does not depend on `glam` directly. `--depth 1` is load-bearing: `glam` is
+/// transitive through `game`, so a full-tree check would always see it.
+#[test]
+fn protocol_depends_on_game_not_glam() {
     let output = Command::new("cargo")
-        .args(["tree", "-p", "protocol", "--edges", "normal"])
+        .args([
+            "tree", "-p", "protocol", "--depth", "1", "--edges", "normal",
+        ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("Failed to run cargo tree");
 
-    if !output.status.success() {
-        panic!("cargo tree -p protocol failed");
-    }
+    assert!(
+        output.status.success(),
+        "cargo tree -p protocol failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check that neither 'game' nor 'glam' appears in the dependency tree
     assert!(
-        !stdout.contains("game "),
-        "protocol crate should not depend on 'game' crate, but found in tree:\n{}",
-        stdout
+        stdout.contains("game v0.1.0"),
+        "protocol crate should depend on 'game' v0.1.0, tree:\n{stdout}"
     );
     assert!(
-        !stdout.contains("glam "),
-        "protocol crate should not depend on 'glam' crate, but found in tree:\n{}",
-        stdout
+        !stdout.lines().any(|line| line.contains("glam v")),
+        "protocol crate should not have a direct 'glam' dependency, tree:\n{stdout}"
     );
 }

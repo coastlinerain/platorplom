@@ -7,11 +7,11 @@ fn b1_transition_right_changes_coords() {
     let mut h = TestHarness::new();
     let p0 = h.connect_client();
 
-    // Place at x=766 so player's right edge (796) exceeds the 795 px
-    // threshold. colision's 2px horizontal inset keeps the sample
-    // points at (768..796) inside the 800px level at col 19 (Empty),
-    // so the player is not stuck. Both server AND client must be at
-    // the edge so that client-side check_level_transitions fires.
+    // Room changes are server-authoritative: the client's predicted body
+    // reaches the raw geometric East band (x >= 760), so it sends one
+    // RequestRoomChange. The server validates it against the door and
+    // teleports to the canonical entry (10, 321). Both server AND client are
+    // staged inside the band so the request is deterministic.
     h.set_server_player_pos(p0, 766.0, 320.0);
     h.set_client_player_pos(p0, 766.0, 320.0);
     h.hold_right(p0, 10);
@@ -32,12 +32,20 @@ fn b2_transition_left_changes_coords() {
 
     // First transition into room (1, 0).
     h.set_server_player_pos(p0, 790.0, 320.0);
+    h.set_client_player_pos(p0, 790.0, 320.0);
     h.hold_right(p0, 10);
     h.tick_n(10);
     assert_eq!(h.client_player_coords(p0), (1, 0));
 
+    // Leave the entry band (re-arm) and wait out the server cooldown before
+    // reversing.
+    h.set_server_player_pos(p0, 100.0, 320.0);
+    h.set_client_player_pos(p0, 100.0, 320.0);
+    h.tick_n(12);
+
     // Now move left to go back.
-    h.set_server_player_pos(p0, 10.0, 320.0);
+    h.set_server_player_pos(p0, 5.0, 320.0);
+    h.set_client_player_pos(p0, 5.0, 320.0);
     h.hold_left(p0, 10);
     h.tick_n(10);
 
@@ -55,6 +63,7 @@ fn b3_transition_down_changes_coords() {
     let p0 = h.connect_client();
 
     h.set_server_player_pos(p0, 300.0, 470.0);
+    h.set_client_player_pos(p0, 300.0, 470.0);
     h.tick_n(15);
 
     let (_cx, cy) = h.client_player_coords(p0);
@@ -68,11 +77,18 @@ fn b4_transition_up_changes_coords() {
 
     // Go down first.
     h.set_server_player_pos(p0, 300.0, 470.0);
+    h.set_client_player_pos(p0, 300.0, 470.0);
     h.tick_n(15);
     assert_eq!(h.client_player_coords(p0).1, 1);
 
+    // Leave the entry band (re-arm) and wait out the server cooldown.
+    h.set_server_player_pos(p0, 300.0, 100.0);
+    h.set_client_player_pos(p0, 300.0, 100.0);
+    h.tick_n(12);
+
     // Now jump up.
     h.set_server_player_pos(p0, 300.0, 10.0);
+    h.set_client_player_pos(p0, 300.0, 10.0);
     h.set_server_player_grounded(p0, true);
     h.press_jump(p0);
     h.tick_n(5);
@@ -124,6 +140,7 @@ fn b6_not_stuck_after_left_transition() {
     // Reposition in room (1, 0) at a safe spot, then go left back.
     h.set_server_player_pos(p0, 100.0, 320.0);
     h.set_client_player_pos(p0, 100.0, 320.0);
+    h.tick_n(12);
 
     // Transition left: move to left edge of room (1,0) and cross.
     h.set_server_player_pos(p0, 5.0, 320.0);
@@ -186,6 +203,7 @@ fn b8_not_stuck_after_up_transition() {
     // Reposition in room (0,1) then jump up back to (0,0).
     h.set_server_player_pos(p0, 300.0, 100.0);
     h.set_client_player_pos(p0, 300.0, 100.0);
+    h.tick_n(12);
 
     // Jump up to transition back to room (0,0).
     h.set_server_player_pos(p0, 300.0, 10.0);

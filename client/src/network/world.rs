@@ -299,7 +299,7 @@ pub fn send_join_req(network: &mut dyn PacketIO) {
 // Boxes 1 + 5 for the API these exercise.
 #[cfg(test)]
 mod tests {
-    use super::handle_packet;
+    use super::{handle_packet, send_input};
     use crate::network::packet_io::PacketIO;
     use crate::world::game::World;
     use game::config::TICK_HZ;
@@ -451,5 +451,41 @@ mod tests {
             "client must never send PlayerDied: {:?}",
             sent.0.borrow()
         );
+    }
+
+    /// C7 — `send_input` builds a `PlayerInput` with no room fields (the struct
+    /// itself is the compile-time assertion) and still carries flags + seq.
+    #[test]
+    fn send_input_omits_room_fields() {
+        let (mut world, sends) = make_world();
+        world.id = Some(3);
+        world.move_right = true;
+        world.pressed_jump = true;
+
+        send_input(&mut world);
+
+        {
+            let sent = sends.0.borrow();
+            assert_eq!(sent.len(), 1);
+            match &sent[0] {
+                GamePacket::PlayerInput {
+                    id,
+                    move_left,
+                    move_right,
+                    jump,
+                    shoot,
+                    seq,
+                } => {
+                    assert_eq!(*id, 3);
+                    assert!(!*move_left);
+                    assert!(*move_right);
+                    assert!(*jump);
+                    assert!(!*shoot);
+                    assert_eq!(*seq, world.input_seq);
+                }
+                other => panic!("expected PlayerInput, got {other:?}"),
+            }
+        }
+        assert_eq!(world.input_buffer.len(), 1);
     }
 }

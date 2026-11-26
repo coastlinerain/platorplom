@@ -508,29 +508,6 @@ mod tests {
         assert!(world.players()[&0].pos.y < 100.0);
     }
 
-    #[test]
-    fn apply_input_out_of_range_coords_fall_back_to_origin() {
-        let mut world = ServerWorld::new();
-        world.spawn(0);
-
-        // A client-reported (255,255) room must not index-panic; it falls back
-        // to the origin level where the (100,100) spawn is in-bounds.
-        world.apply_input(
-            0,
-            255,
-            255,
-            PlayerInput {
-                move_right: true,
-                ..Default::default()
-            },
-            0,
-        );
-
-        world.update(tick_dt());
-
-        assert!(world.players()[&0].pos.x > 100.0);
-    }
-
     // --- max_seq tests (Phase 2c) ---
 
     /// AC 28 — max_seq is updated on apply_input with wrapping-aware comparison.
@@ -977,5 +954,302 @@ mod raycast_and_hit_tests {
         assert_eq!(shots.len(), 2);
         assert_eq!(shots[0].owner_id, 1);
         assert_eq!(shots[1].owner_id, 3);
+    }
+}
+
+// Spec 3 (authoritative room membership) — `apply_room_change`, `force_teleport`
+// and the authoritative-coords invariants. See plan Box 3.
+#[cfg(test)]
+mod room_change_tests {
+    use super::ServerWorld;
+    use game::config::ROOM_CHANGE_COOLDOWN_TICKS;
+    use game::entities::bullet::Bullet;
+    use game::entities::player::PlayerInput;
+    use game::room_graph::Direction;
+    use glam::Vec2;
+
+    /// Spawn `id`, place it at `(x, y)` facing `dir` with the canonical player
+    /// size, zero velocity and `grounded = true`, in room `(0, 0)`.
+    fn place(world: &mut ServerWorld, id: u8, x: f32, y: f32, dir: f32) {
+        world.spawn(id);
+        let player = world.players.get_mut(&id).expect("just spawned");
+        player.pos = Vec2::new(x, y);
+        player.w = 30.0;
+        player.h = 38.0;
+        player.vel = Vec2::ZERO;
+        player.dir = dir;
+        player.grounded = true;
+        world.coords.insert(id, (0, 0));
+    }
+
+    fn tick() -> f32 {
+        1.0 / 60.0
+    }
+
+    /// S1 — a request made from inside the geometric East band is accepted and
+    /// teleports to the canonical entry.
+    #[test]
+    fn apply_room_change_accepts_at_door() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 766.0, 320.0, 1.0);
+
+        let info = world.apply_room_change(1, Direction::East).unwrap();
+
+        assert!(info.accepted);
+        assert_eq!(info.room, (1, 0));
+        assert_eq!(info.pos, (10.0, 321.0));
+        assert_eq!(world.coords()[&1], (1, 0));
+        assert_eq!(world.players()[&1].pos, Vec2::new(10.0, 321.0));
+    }
+
+    /// S2 — one prediction tick short of the geometric band is still accepted
+    /// via the server-only lead tolerance.
+    #[test]
+    fn apply_room_change_accepts_within_lead_tolerance() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 730.0, 320.0, 1.0);
+
+        let info = world.apply_room_change(1, Direction::East).unwrap();
+
+        assert!(info.accepted);
+        assert_eq!(info.room, (1, 0));
+        assert_eq!(info.pos, (10.0, 321.0));
+        assert_eq!(world.coords()[&1], (1, 0));
+    }
+
+    /// S3 — beyond the lead tolerance the request is rejected and nothing moves.
+    #[test]
+    fn apply_room_change_rejects_beyond_lead_tolerance() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 700.0, 320.0, 1.0);
+
+        let info = world.apply_room_change(1, Direction::East).unwrap();
+
+        assert!(!info.accepted);
+        assert_eq!(info.room, (0, 0));
+        assert_eq!(info.pos, (700.0, 320.0));
+        assert_eq!(world.coords()[&1], (0, 0));
+    }
+
+    /// S4 — directions with no door are rejected, twice in a row, without state.
+    #[test]
+    fn apply_room_change_rejects_no_door() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 100.0, 1.0);
+
+        for direction in [Direction::North, Direction::West] {
+            let info = world.apply_room_change(1, direction).unwrap();
+            assert!(!info.accepted);
+            assert_eq!(info.room, (0, 0));
+            assert_eq!(info.pos, (100.0, 100.0));
+        }
+
+        assert_eq!(world.coords()[&1], (0, 0));
+        assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 100.0));
+    }
+
+    /// S5 — a real door requested from the middle of the room is rejected.
+    #[test]
+    fn apply_room_change_rejects_off_trigger() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 200.0, 1.0);
+
+        let info = world.apply_room_change(1, Direction::East).unwrap();
+
+        assert!(!info.accepted);
+        assert_eq!(world.coords()[&1], (0, 0));
+        assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 200.0));
+    }
+
+    /// S6 — the cooldown rejects an immediate reverse request; once it expires
+    /// the same request is accepted (the entry overlaps the reverse band).
+    #[test]
+    fn apply_room_change_rejects_during_cooldown() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 766.0, 320.0, 1.0);
+
+        let first = world.apply_room_change(1, Direction::East).unwrap();
+        assert!(first.accepted);
+
+        let blocked = world.apply_room_change(1, Direction::West).unwrap();
+        assert!(!blocked.accepted);
+        assert_eq!(blocked.room, (1, 0));
+        assert_eq!(blocked.pos, (10.0, 321.0));
+
+        for _ in 0..ROOM_CHANGE_COOLDOWN_TICKS {
+            world.update(tick());
+        }
+
+        let accepted = world.apply_room_change(1, Direction::West).unwrap();
+        assert!(accepted.accepted);
+        assert_eq!(accepted.room, (0, 0));
+        assert_eq!(accepted.pos, (760.0, 321.0));
+        assert_eq!(world.coords()[&1], (0, 0));
+    }
+
+    /// S7 — acceptance teleports to the entry, zeroes velocity, recomputes
+    /// `grounded`, and preserves dir, bullets, pending input, cooldown and seq.
+    #[test]
+    fn apply_room_change_teleports_to_entry() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 766.0, 320.0, -1.0);
+
+        world
+            .players
+            .get_mut(&1)
+            .expect("just placed")
+            .bullets
+            .push(Bullet::new(Vec2::new(1.0, 1.0), 1.0, 1));
+        world.apply_input(
+            1,
+            PlayerInput {
+                move_right: true,
+                jump: true,
+                ..Default::default()
+            },
+            9,
+        );
+        world.shoot_cooldown.insert(1, 3);
+
+        // Prove `grounded` is recomputed, not inherited from `place`.
+        world.players.get_mut(&1).expect("just placed").grounded = false;
+
+        let info = world.apply_room_change(1, Direction::East).unwrap();
+        assert!(info.accepted);
+
+        let player = &world.players()[&1];
+        assert_eq!(player.pos, Vec2::new(10.0, 321.0));
+        assert_eq!(player.vel, Vec2::ZERO);
+        assert_eq!(player.dir, -1.0);
+        assert!(player.grounded, "grounded should be recomputed in (1,0)");
+        assert_eq!(player.bullets.len(), 1, "bullets must be preserved");
+
+        assert!(world.pending[&1].move_right);
+        assert!(world.pending[&1].jump);
+        assert_eq!(world.shoot_cooldown[&1], 3);
+        assert_eq!(world.max_seq()[&1], 9);
+    }
+
+    /// S8 — `apply_input` never writes `coords`, including after a respawn
+    /// (the spec-2 respawn-overwrite bug).
+    #[test]
+    fn apply_input_never_changes_coords() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 100.0, 1.0);
+
+        world.force_teleport(1, (1, 0), (100.0, 100.0));
+        world.apply_input(
+            1,
+            PlayerInput {
+                move_right: true,
+                ..Default::default()
+            },
+            1,
+        );
+        assert_eq!(world.coords()[&1], (1, 0));
+
+        world.respawn(1);
+        assert_eq!(world.coords()[&1], (0, 0));
+
+        world.apply_input(
+            1,
+            PlayerInput {
+                move_right: true,
+                ..Default::default()
+            },
+            2,
+        );
+        assert_eq!(world.coords()[&1], (0, 0));
+    }
+
+    /// S9 — a respawn from another room is a forced teleport with no door check.
+    #[test]
+    fn respawn_ignores_door_validation() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 100.0, 1.0);
+
+        world.force_teleport(1, (1, 1), (10.0, 401.0));
+        world.respawn(1);
+
+        assert_eq!(world.coords()[&1], (0, 0));
+        assert_eq!(world.players()[&1].pos, Vec2::new(100.0, 100.0));
+    }
+
+    /// S10 — `force_teleport` bypasses doors, zeroes velocity (exercised with a
+    /// non-zero starting velocity) and recomputes `grounded`.
+    #[test]
+    fn force_teleport_bypasses_doors() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 100.0, 1.0);
+
+        world.players.get_mut(&1).expect("just placed").vel = Vec2::new(50.0, -20.0);
+        world.players.get_mut(&1).expect("just placed").grounded = false;
+
+        world.force_teleport(1, (1, 1), (10.0, 401.0));
+
+        assert_eq!(world.coords()[&1], (1, 1));
+        assert_eq!(world.players()[&1].pos, Vec2::new(10.0, 401.0));
+        assert_eq!(world.players()[&1].vel, Vec2::ZERO);
+        assert!(
+            world.players()[&1].grounded,
+            "grounded should be recomputed in (1,1) at (10, 401)"
+        );
+    }
+
+    /// S11 — a victim cannot hide from a raycast by claiming another room; the
+    /// rejected request leaves it in the shooter's room.
+    #[test]
+    fn raycast_victim_cannot_hide_by_room_claim() {
+        let mut world = ServerWorld::new();
+        place(&mut world, 1, 100.0, 200.0, 1.0);
+        place(&mut world, 2, 400.0, 200.0, 1.0);
+
+        assert!(
+            !world
+                .apply_room_change(2, Direction::East)
+                .unwrap()
+                .accepted
+        );
+        assert!(
+            !world
+                .apply_room_change(2, Direction::South)
+                .unwrap()
+                .accepted
+        );
+        assert_eq!(world.coords()[&2], (0, 0));
+
+        assert_eq!(world.raycast_player(1, 115.0, 219.0, 1.0), Some((2, 400.0)));
+    }
+
+    /// S12 — an unknown player returns `None` and creates no state.
+    #[test]
+    fn apply_room_change_returns_none_for_missing_player() {
+        let mut world = ServerWorld::new();
+
+        assert_eq!(world.apply_room_change(9, Direction::East), None);
+        assert!(world.coords().get(&9).is_none());
+    }
+
+    /// S13 — an out-of-range forced room must not index-panic and the input
+    /// still drives movement (replaces the old client-claimed-coords test).
+    #[test]
+    fn force_teleport_out_of_range_room_falls_back_to_origin() {
+        let mut world = ServerWorld::new();
+        world.spawn(0);
+
+        world.force_teleport(0, (255, 255), (100.0, 100.0));
+        world.apply_input(
+            0,
+            PlayerInput {
+                move_right: true,
+                ..Default::default()
+            },
+            0,
+        );
+
+        world.update(tick());
+
+        assert!(world.players()[&0].pos.x > 100.0);
+        assert_eq!(world.coords()[&0], (255, 255));
     }
 }
