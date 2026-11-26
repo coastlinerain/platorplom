@@ -53,10 +53,14 @@ fn headless_fixed_timestep_no_drift() {
 
     // A fixed-timestep loop takes AT LEAST `duration_secs`. The pre-fix
     // `sleep(16)` loop finishes early (drift) relative to the 60Hz interval.
-    // The lower bound catches that early-finish; the upper bound is generous
-    // to absorb `cargo run` launch + window creation overhead in CI.
+    // The lower bound catches that early-finish. The upper bound is only a loose
+    // hang check, NOT a drift assertion: `elapsed` is measured around a `cargo
+    // run` subprocess (build/launch overhead included), and CPU contention on the
+    // shared CI runner makes `app.update` spikes accumulate beyond the 16.7ms
+    // tick budget. A real hang runs far longer than 30s, so the generous upper
+    // bound still catches it while absorbing CI load.
     let lower = Duration::from_millis(duration_secs * 1000 - 400);
-    let upper = Duration::from_millis(duration_secs * 1000 + 2500);
+    let upper = Duration::from_millis(duration_secs * 1000 + 30_000);
     assert!(
         elapsed >= lower,
         "headless loop finished early: {:?} < {:?} (fixed timestep must not finish before the target duration)",

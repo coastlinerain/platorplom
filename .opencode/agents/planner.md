@@ -1,6 +1,7 @@
 ---
 description: Turns a spec into a checkable implementation plan
 mode: subagent
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"

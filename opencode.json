@@ -2,8 +2,7 @@
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "orchestrator",
   "instructions": [
-    "CONTRIBUTING.md",
-    "docs/progress.md"
+    "CONTRIBUTING.md"
   ],
   "permissions": [
     { "action": "shell", "resource": "git push *", "effect": "allow" },

@@ -1,8 +1,42 @@
 #!/usr/bin/env sh
 # pre-commit hook: run formatting, linting, and tests before allowing a commit.
+#
+# Quiet on success: command output is captured and only printed on failure.
+# `cargo test` is skipped when only docs (.md) files are staged, to keep
+# docs-only commits fast and low-noise.
 
 set -e
 
-cargo fmt --check
-cargo clippy
-cargo test
+# Detect docs-only commits (every staged path ends in .md).
+docs_only=true
+for f in $(git diff --cached --name-only); do
+    case "$f" in
+        *.md) ;;
+        *) docs_only=false; break ;;
+    esac
+done
+
+run_gate() {
+    label="$1"; shift
+    log="/tmp/rustvania-precommit-$$.log"
+    if "$@" >"$log" 2>&1; then
+        echo "  ok: $label"
+    else
+        echo "  FAILED: $label"
+        cat "$log"
+        rm -f "$log"
+        exit 1
+    fi
+    rm -f "$log"
+}
+
+echo "pre-commit: running quality gates"
+
+run_gate "cargo fmt --check" cargo fmt --check
+run_gate "cargo clippy" cargo clippy
+
+if [ "$docs_only" = "false" ]; then
+    run_gate "cargo test" cargo test
+else
+    echo "  skip: cargo test (docs-only commit)"
+fi

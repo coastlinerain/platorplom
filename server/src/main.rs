@@ -40,9 +40,6 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::Leave { .. } => "Leave",
         GamePacket::Hit { .. } => "Hit",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
-        GamePacket::EnemyDied { .. } => "EnemyDied",
-        GamePacket::EnemyStateRequest { .. } => "EnemyStateRequest",
-        GamePacket::EnemyStateResponse { .. } => "EnemyStateResponse",
     }
 }
 
@@ -54,11 +51,6 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::Leave { id } => Some(*id),
         GamePacket::Hit { entity_id } => Some(*entity_id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
-        GamePacket::EnemyDied {
-            enemy_id,
-            room_x: _,
-            room_y: _,
-        } => Some(*enemy_id),
         _ => None,
     }
 }
@@ -142,23 +134,6 @@ fn packet_key_fields(p: &GamePacket) -> serde_json::Value {
             "dir": dir,
             "owner_id": owner_id,
             "seq": seq,
-        }),
-        GamePacket::EnemyDied {
-            enemy_id,
-            room_x,
-            room_y,
-        } => json!({
-            "enemy_id": enemy_id,
-            "room": [room_x, room_y],
-        }),
-        GamePacket::EnemyStateRequest { room_x, room_y } => json!({ "room": [room_x, room_y] }),
-        GamePacket::EnemyStateResponse {
-            room_x,
-            room_y,
-            enemies,
-        } => json!({
-            "room": [room_x, room_y],
-            "enemy_count": enemies.len(),
         }),
     }
 }
@@ -262,19 +237,6 @@ fn main() {
                                     }
                                 }
                             }
-                            GamePacket::EnemyStateRequest { room_x, room_y } => {
-                                // Respond with EnemyStateResponse for the requested room
-                                let enemies = world.get_enemy_state(room_x, room_y);
-                                let response = GamePacket::EnemyStateResponse {
-                                    room_x,
-                                    room_y,
-                                    enemies,
-                                };
-                                let bytes = postcard::to_allocvec(&response).unwrap();
-                                log_packet("sent", &response);
-                                let _ =
-                                    packet_sender.send(Packet::reliable_ordered(addr, bytes, None));
-                            }
                             // Client-sent PlayerPos is no longer accepted — the server is authoritative.
                             GamePacket::PlayerPos { .. } => {}
                             _ => {}
@@ -305,7 +267,7 @@ fn main() {
         //   and the tick rate simply degrades rather than spiraling.
         let now = Instant::now();
         while now >= next_tick {
-            let (shots, deaths) = world.update(tick_dt);
+            let shots = world.update(tick_dt);
 
             // Broadcast authoritative PlayerPos from EVERY player to EVERY
             // connected address (nested loop: dest × players). The own-player
@@ -349,27 +311,6 @@ fn main() {
                         bytes.clone(),
                         None,
                     ));
-                }
-            }
-
-            // Broadcast EnemyDied to clients in the same room via reliable_ordered
-            for death in &deaths {
-                let packet = GamePacket::EnemyDied {
-                    enemy_id: death.enemy_id,
-                    room_x: death.room_x,
-                    room_y: death.room_y,
-                };
-                let bytes = postcard::to_allocvec(&packet).unwrap();
-                log_packet("sent", &packet);
-                for (&dest_addr, &player_id) in &addrs {
-                    let player_coords = world.coords().get(&player_id).copied().unwrap_or((0, 0));
-                    if player_coords == (death.room_x, death.room_y) {
-                        let _ = packet_sender.send(Packet::reliable_ordered(
-                            dest_addr,
-                            bytes.clone(),
-                            None,
-                        ));
-                    }
                 }
             }
 

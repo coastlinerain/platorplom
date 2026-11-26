@@ -191,66 +191,6 @@ fn round_trip_bulletspawn() {
     });
 }
 
-#[test]
-fn round_trip_enemydied() {
-    round_trip(GamePacket::EnemyDied {
-        enemy_id: 0,
-        room_x: 0,
-        room_y: 0,
-    });
-    round_trip(GamePacket::EnemyDied {
-        enemy_id: 63,
-        room_x: 3,
-        room_y: 3,
-    });
-    round_trip(GamePacket::EnemyDied {
-        enemy_id: 15,
-        room_x: 0,
-        room_y: 1,
-    });
-}
-
-#[test]
-fn round_trip_enemystaterequest() {
-    round_trip(GamePacket::EnemyStateRequest {
-        room_x: 0,
-        room_y: 0,
-    });
-    round_trip(GamePacket::EnemyStateRequest {
-        room_x: 3,
-        room_y: 3,
-    });
-    round_trip(GamePacket::EnemyStateRequest {
-        room_x: 1,
-        room_y: 2,
-    });
-}
-
-#[test]
-fn round_trip_enemystateresponse() {
-    round_trip(GamePacket::EnemyStateResponse {
-        room_x: 0,
-        room_y: 0,
-        enemies: vec![],
-    });
-    round_trip(GamePacket::EnemyStateResponse {
-        room_x: 1,
-        room_y: 0,
-        enemies: vec![(0, true, 100.0, 200.0), (1, false, 150.0, 200.0)],
-    });
-    round_trip(GamePacket::EnemyStateResponse {
-        room_x: 0,
-        room_y: 1,
-        enemies: vec![
-            (0, true, 50.0, 50.0),
-            (1, true, 100.0, 50.0),
-            (2, true, 150.0, 50.0),
-            (3, false, 200.0, 50.0),
-            (4, true, 250.0, 50.0),
-        ],
-    });
-}
-
 /// AC 2 — `GamePacket::Action` variant is removed from the enum.
 /// This test verifies that constructing an Action packet fails to compile
 /// by using a compile-time check. Since Action is removed, this test
