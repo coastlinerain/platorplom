@@ -67,7 +67,7 @@ impl Drawable for Nemesis {
 }
 
 /// Draw a Nemesis at an interpolated position instead of its raw `.pos`.
-/// Called from `World::draw` when `RemoteInterp::interpolate` returns a value.
+/// Called from `World::draw` when `RemoteInterp::interpolate_at_tick` returns a value.
 pub fn draw_nemesis_at(nemesis: &Nemesis, x: f32, y: f32, dir: f32) {
     draw_rectangle(x, y, nemesis.w, nemesis.h, ORANGE);
 
