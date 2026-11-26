@@ -41,18 +41,4 @@ pub enum GamePacket {
         owner_id: u8,
         seq: u16,
     },
-    EnemyDied {
-        enemy_id: u8,
-        room_x: u8,
-        room_y: u8,
-    },
-    EnemyStateRequest {
-        room_x: u8,
-        room_y: u8,
-    },
-    EnemyStateResponse {
-        room_x: u8,
-        room_y: u8,
-        enemies: Vec<(u8, bool, f32, f32)>, // (enemy_id, alive, spawn_x, spawn_y)
-    },
 }

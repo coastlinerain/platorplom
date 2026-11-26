@@ -2,7 +2,7 @@ use crate::camera::GameCamera;
 use crate::network::packet_io::PacketIO;
 use crate::render::Drawable;
 use crate::world::lib::{
-    check_level_transitions, check_player_death, update_enemy_bullets_position,
+    check_level_transitions, check_player_death, update_remote_bullets_position,
 };
 
 use crate::network::interpolation::RemoteInterp;
@@ -10,7 +10,6 @@ use crate::network::prediction::InputRingBuffer;
 use crate::network::world::update_network;
 use game::config::INTERPOLATION_DELAY_TICKS;
 use game::entities::bullet::Bullet;
-use game::entities::enemy::Enemy;
 use game::entities::nemesis::Nemesis;
 use game::entities::player::Player;
 use game::level::Level;
@@ -31,13 +30,12 @@ pub struct ConfirmedBullet {
 pub struct World {
     pub id: Option<u8>,
     pub player: Player,
-    pub enemies: Vec<Enemy>,
     pub levels_matrix: Vec<Vec<Level>>,
     pub current_coords: (usize, usize),
     pub camera: GameCamera,
     pub network: Box<dyn PacketIO>,
     pub other_players: HashMap<u8, Nemesis>,
-    pub enemy_bullets: Vec<Bullet>,
+    pub remote_bullets: Vec<Bullet>,
     pub bullets: Vec<Bullet>, // own bullets (server-authoritative)
     // --- prediction fields ---
     pub input_seq: u16,
@@ -55,8 +53,6 @@ pub struct World {
     // --- NEW: Phase 2e ---
     pub spawned_bullet_ids: HashSet<u16>, // deduplicate BulletSpawn packets
     pub confirmed_bullets: HashMap<u16, ConfirmedBullet>, // seq -> confirmed bullet data
-    // Enemy deaths received before enemy was spawned (race condition fix)
-    pub pending_enemy_deaths: HashSet<u8>,
     // --- NEW: Phase 2f - Clock synchronization ---
     pub client_tick: u64,
     pub server_tick_offset: i64, // server_tick - client_tick
@@ -79,7 +75,6 @@ impl fmt::Debug for World {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("World")
             .field("player", &self.player)
-            .field("enemies", &self.enemies)
             .field("levels_matrix", &self.levels_matrix.len())
             .field("current_coords", &self.current_coords)
             .field("camera", &self.camera)
@@ -107,8 +102,6 @@ impl World {
             })
             .collect();
 
-        let enemies = game::entities::enemy::enemies_from_data(&levels[0][0].data, 0);
-
         let player = Player::new(0);
         // Initialize the interpolation source to the player's spawn state so the
         // first rendered frame shows the current position with no visual jump.
@@ -120,13 +113,12 @@ impl World {
             player,
             prev_player_pos,
             prev_player_dir,
-            enemies,
             levels_matrix: levels,
             current_coords: (0, 0),
             camera: GameCamera::new(),
             network,
             other_players: HashMap::new(),
-            enemy_bullets: Vec::new(),
+            remote_bullets: Vec::new(),
             bullets: Vec::new(),
             input_seq: u16::MAX,
             last_acked_seq: u16::MAX,
@@ -137,7 +129,6 @@ impl World {
             // NEW: Phase 2e
             spawned_bullet_ids: HashSet::new(),
             confirmed_bullets: HashMap::new(),
-            pending_enemy_deaths: HashSet::new(),
             // NEW: Phase 2f - Clock synchronization
             client_tick: 0,
             server_tick_offset: 0,
@@ -157,10 +148,9 @@ impl World {
         // Increment client tick for clock synchronization (once per sim tick).
         self.client_tick = self.client_tick.wrapping_add(1);
 
-        // Run transition check AFTER bullet-vs-enemy collision so bullets
-        // can hit enemies on the frame they're fired, even if the player
-        // crosses a room boundary on the same frame.
-        update_enemy_bullets_position(self, dt);
+        // Run transition check AFTER remote-bullet collision so bullets
+        // can hit the local player on the frame they arrive.
+        update_remote_bullets_position(self, dt);
         check_player_death(self);
         {
             let level = &self.levels_matrix[self.current_coords.1][self.current_coords.0];
@@ -190,25 +180,15 @@ impl World {
                 bullet.update(dt, level);
             }
 
-            // NOTE: Own-bullet vs enemy collision loop REMOVED (Phase 2e).
-            // Enemy death is now server-authoritative via EnemyDied packets.
-
-            // Enemies still simulated client-side (not authoritative yet).
-            for enemy in &mut self.enemies {
-                let random = macroquad::rand::gen_range(0, 4);
-                enemy.update(dt, level, random);
-            }
-
             self.camera
                 .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
-        // Must run AFTER bullet collision so bullets can hit enemies before
+        // Must run AFTER bullet collision so bullets can hit the player before
         // load_current_level (called by check_level_transitions) clears them.
         check_level_transitions(self);
         update_network(self);
 
         self.bullets.retain(|b| b.active);
-        self.enemies.retain(|e| e.alive);
     }
 
     /// Interpolate the local player's render position between the previous and
@@ -282,14 +262,9 @@ impl World {
             bullet.draw();
         }
 
-        // Remote enemy bullets.
-        for bullet in &self.enemy_bullets {
+        // Remote player bullets.
+        for bullet in &self.remote_bullets {
             bullet.draw();
-        }
-
-        // Local enemies.
-        for enemy in &self.enemies {
-            enemy.draw();
         }
 
         set_default_camera();

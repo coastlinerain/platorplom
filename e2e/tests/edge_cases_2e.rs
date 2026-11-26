@@ -2,7 +2,6 @@
 // These cover edge cases mentioned in the spec.
 
 use e2e::harness::TestHarness;
-use protocol::GamePacket;
 
 /// Edge case: Shooter fires, transitions room before BulletSpawn arrives.
 /// Bullet spawns in new room but server raycast was in old room;
@@ -43,35 +42,6 @@ fn test_e2e_bullet_spawn_during_room_transition() {
     // Just verify no panic and client is in a valid room.
     // Note: Room transition might not happen in this test setup due to timing.
     // The key assertion is that no panic occurs.
-}
-
-/// Edge case: Client receives EnemyDied for enemy not yet in local list
-/// (room mismatch) → ignore silently; room load EnemyStateResponse shows alive: false.
-#[test]
-fn test_e2e_enemy_died_before_room_load() {
-    let mut harness = TestHarness::new();
-    let handle = harness.connect_client();
-
-    harness.tick_n(3);
-
-    // Client is in room (0,0). Receive EnemyDied for room (1,0).
-    let enemy_died = GamePacket::EnemyDied {
-        enemy_id: 5,
-        room_x: 1,
-        room_y: 0,
-    };
-
-    // Inject directly into client's server-to-client channel
-    harness.inject_server_packet(handle, enemy_died);
-    harness.tick();
-
-    // Should ignore silently (no panic, no error)
-    // Enemy list unchanged (still empty or whatever it was)
-    // Later when transitioning to (1,0), EnemyStateResponse will show alive: false
-
-    // Just verify no crash
-    let client = harness.client(handle);
-    assert_eq!(client.world.current_coords, (0, 0));
 }
 
 /// Edge case: Two shoots with 4-tick gap (cooldown=5) → second fires

@@ -81,7 +81,7 @@ fn test_bulletspawn_handler_spawns_own_bullet() {
 }
 
 /// AC 14 — handle_packet on BulletSpawn with owner_id != world.id spawns
-/// Bullet in world.enemy_bullets.
+/// Bullet in world.remote_bullets.
 #[test]
 fn test_bulletspawn_handler_spawns_remote_bullet() {
     let mut harness = TestHarness::new();
@@ -110,11 +110,11 @@ fn test_bulletspawn_handler_spawns_remote_bullet() {
         handle_packet(&mut client.world, bullet_spawn);
     }
 
-    // Client B should have the bullet in enemy_bullets (not bullets)
+    // Client B should have the bullet in remote_bullets (not bullets)
     let client_b = harness.client(handle_b);
     assert_eq!(client_b.world.bullets.len(), 0);
-    assert_eq!(client_b.world.enemy_bullets.len(), 1);
-    let bullet = &client_b.world.enemy_bullets[0];
+    assert_eq!(client_b.world.remote_bullets.len(), 1);
+    let bullet = &client_b.world.remote_bullets[0];
     assert_eq!(bullet.pos.x, 300.0);
     assert_eq!(bullet.pos.y, 400.0);
     assert_eq!(bullet_dir(bullet), -1.0);
@@ -197,10 +197,10 @@ fn test_e2e_bulletspawn_both_clients() {
     // Both should have exactly 1 bullet at the same position
     // (server-authoritative spawn position)
     assert_eq!(client_a.world.bullets.len(), 1);
-    assert_eq!(client_b.world.enemy_bullets.len(), 1);
+    assert_eq!(client_b.world.remote_bullets.len(), 1);
 
     let bullet_a = &client_a.world.bullets[0];
-    let bullet_b = &client_b.world.enemy_bullets[0];
+    let bullet_b = &client_b.world.remote_bullets[0];
 
     // Positions should match (server-authoritative)
     assert_eq!(bullet_a.pos.x, bullet_b.pos.x);

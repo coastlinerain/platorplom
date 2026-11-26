@@ -232,7 +232,7 @@ impl TestHarness {
         }
 
         // Step 4: Server update.
-        let (shots, deaths) = self.server.update(tick_dt);
+        let shots = self.server.update(tick_dt);
         // Accumulate shot counts (server never stores Bullet objects — D6).
         self.last_shots.clear();
         for shot in &shots {
@@ -290,30 +290,8 @@ impl TestHarness {
             }
         }
 
-        // Step 6b: Broadcast EnemyDied to clients in the same room via reliable_ordered.
-        for death in &deaths {
-            let packet = GamePacket::EnemyDied {
-                enemy_id: death.enemy_id,
-                room_x: death.room_x,
-                room_y: death.room_y,
-            };
-            let bytes = postcard::to_allocvec(&packet).expect("serialize EnemyDied");
-            for (idx, tx) in self.to_clients.iter().enumerate() {
-                let client_id = self.clients[idx].player_id;
-                let client_coords = self
-                    .server
-                    .coords()
-                    .get(&client_id)
-                    .copied()
-                    .unwrap_or((0, 0));
-                if client_coords == (death.room_x, death.room_y) {
-                    let _ = tx.send(bytes.clone());
-                }
-            }
-        }
-
         // Step 7: Each client drains server→client channel, runs local
-        // prediction, and cleans up bullets/enemies.
+        // prediction, and cleans up bullets.
         // Order: reconcile → predict → transitions (matches plan spec).
         for client in &mut self.clients {
             // --- 7a: receive server packets (reconciliation) ---
@@ -346,11 +324,8 @@ impl TestHarness {
                     for bullet in &mut client.world.bullets {
                         bullet.update(tick_dt, level);
                     }
-                    for bullet in &mut client.world.enemy_bullets {
+                    for bullet in &mut client.world.remote_bullets {
                         bullet.update(tick_dt, level);
-                    }
-                    for enemy in &mut client.world.enemies {
-                        enemy.update(tick_dt, level, 0);
                     }
                 }
                 // else: bogus coords — skip prediction.
@@ -361,8 +336,7 @@ impl TestHarness {
 
             // --- 7d: cleanup ---
             client.world.bullets.retain(|b| b.active);
-            client.world.enemy_bullets.retain(|b| b.active);
-            client.world.enemies.retain(|e| e.alive);
+            client.world.remote_bullets.retain(|b| b.active);
         }
 
         // Step 8: Advance clock.
@@ -495,7 +469,7 @@ impl TestHarness {
     }
 
     /// Inject a server-to-client packet directly into a client's receive channel.
-    /// Useful for testing server-originated packets like BulletSpawn, EnemyDied, etc.
+    /// Useful for testing server-originated packets like BulletSpawn, etc.
     pub fn inject_server_packet(&mut self, handle: ClientHandle, packet: GamePacket) {
         let idx = self
             .clients

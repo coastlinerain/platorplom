@@ -35,9 +35,6 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::Leave { .. } => "Leave",
         GamePacket::Hit { .. } => "Hit",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
-        GamePacket::EnemyDied { .. } => "EnemyDied",
-        GamePacket::EnemyStateRequest { .. } => "EnemyStateRequest",
-        GamePacket::EnemyStateResponse { .. } => "EnemyStateResponse",
     }
 }
 
@@ -50,11 +47,6 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::Leave { id } => Some(*id),
         GamePacket::Hit { entity_id } => Some(*entity_id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
-        GamePacket::EnemyDied {
-            enemy_id,
-            room_x: _,
-            room_y: _,
-        } => Some(*enemy_id),
         _ => None,
     }
 }
@@ -145,25 +137,6 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             "owner_id": owner_id,
             "seq": seq,
         }),
-        GamePacket::EnemyDied {
-            enemy_id,
-            room_x,
-            room_y,
-        } => serde_json::json!({
-            "enemy_id": enemy_id,
-            "room": [room_x, room_y],
-        }),
-        GamePacket::EnemyStateRequest { room_x, room_y } => {
-            serde_json::json!({ "room": [room_x, room_y] })
-        }
-        GamePacket::EnemyStateResponse {
-            room_x,
-            room_y,
-            enemies,
-        } => serde_json::json!({
-            "room": [room_x, room_y],
-            "enemy_count": enemies.len(),
-        }),
     }
 }
 
@@ -219,29 +192,6 @@ mod tests {
             }),
             "BulletSpawn"
         );
-        assert_eq!(
-            packet_type_name(&GamePacket::EnemyDied {
-                enemy_id: 1,
-                room_x: 0,
-                room_y: 0
-            }),
-            "EnemyDied"
-        );
-        assert_eq!(
-            packet_type_name(&GamePacket::EnemyStateRequest {
-                room_x: 0,
-                room_y: 0
-            }),
-            "EnemyStateRequest"
-        );
-        assert_eq!(
-            packet_type_name(&GamePacket::EnemyStateResponse {
-                room_x: 0,
-                room_y: 0,
-                enemies: vec![]
-            }),
-            "EnemyStateResponse"
-        );
     }
 
     #[test]
@@ -290,29 +240,6 @@ mod tests {
                 seq: 0
             }),
             Some(4)
-        );
-        assert_eq!(
-            packet_id(&GamePacket::EnemyDied {
-                enemy_id: 6,
-                room_x: 0,
-                room_y: 0
-            }),
-            Some(6)
-        );
-        assert_eq!(
-            packet_id(&GamePacket::EnemyStateRequest {
-                room_x: 0,
-                room_y: 0
-            }),
-            None
-        );
-        assert_eq!(
-            packet_id(&GamePacket::EnemyStateResponse {
-                room_x: 0,
-                room_y: 0,
-                enemies: vec![]
-            }),
-            None
         );
     }
 
@@ -448,20 +375,6 @@ mod tests {
             dir: 1.0,
             owner_id: 1,
             seq: 5,
-        });
-        let _ = packet_key_fields(&GamePacket::EnemyDied {
-            enemy_id: 3,
-            room_x: 0,
-            room_y: 1,
-        });
-        let _ = packet_key_fields(&GamePacket::EnemyStateRequest {
-            room_x: 0,
-            room_y: 0,
-        });
-        let _ = packet_key_fields(&GamePacket::EnemyStateResponse {
-            room_x: 0,
-            room_y: 0,
-            enemies: vec![(1, true, 100.0, 100.0)],
         });
     }
 

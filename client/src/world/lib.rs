@@ -1,11 +1,11 @@
 use crate::world::game::World;
 use protocol::GamePacket;
 
-pub fn update_enemy_bullets_position(world: &mut World, dt: f32) {
+pub fn update_remote_bullets_position(world: &mut World, dt: f32) {
     let current_room = world.current_coords;
     let level = &world.levels_matrix[current_room.1][current_room.0];
 
-    world.enemy_bullets.retain_mut(|bullet| {
+    world.remote_bullets.retain_mut(|bullet| {
         if world.other_players.contains_key(&bullet.owner_id) {
             bullet.update(dt, level);
             bullet.active
@@ -17,7 +17,7 @@ pub fn update_enemy_bullets_position(world: &mut World, dt: f32) {
 pub fn check_player_death(world: &mut World) {
     let mut died = false;
 
-    for bullet in &mut world.enemy_bullets {
+    for bullet in &mut world.remote_bullets {
         if bullet.active && bullet.check_collision(&world.player) {
             bullet.active = false;
             died = true;
@@ -46,7 +46,6 @@ fn handle_death(world: &mut World) {
     // Clear bullet tracking on death/respawn
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
-    world.pending_enemy_deaths.clear();
     // Reset clock sync on death
     world.client_tick = 0;
     world.server_tick_offset = 0;
@@ -58,12 +57,10 @@ fn handle_death(world: &mut World) {
 }
 
 fn load_current_level(world: &mut World) {
-    world.enemies.clear();
     world.bullets.clear();
-    world.enemy_bullets.clear();
+    world.remote_bullets.clear();
     world.spawned_bullet_ids.clear();
     world.confirmed_bullets.clear();
-    world.pending_enemy_deaths.clear();
     // Reset clock sync on room transition
     world.client_tick = 0;
     world.server_tick_offset = 0;
@@ -75,16 +72,8 @@ fn load_current_level(world: &mut World) {
     world.jump_sticky = 0;
     world.shoot_sticky = 0;
 
-    // Request authoritative enemy state from server
-    let (rx, ry) = world.current_coords;
-    let req = GamePacket::EnemyStateRequest {
-        room_x: rx as u8,
-        room_y: ry as u8,
-    };
-    world.network.send(req);
-
     println!(
-        "Level {},{} load requested (EnemyStateRequest sent)",
+        "Level {},{} loaded",
         world.current_coords.0, world.current_coords.1
     );
 }

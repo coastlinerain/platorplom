@@ -95,7 +95,6 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
             world.shoot_sticky = 0;
             world.spawned_bullet_ids.clear();
             world.confirmed_bullets.clear();
-            world.pending_enemy_deaths.clear();
             // Reset clock sync fields on new connection
             world.client_tick = 0;
             world.server_tick_offset = 0;
@@ -260,62 +259,10 @@ pub fn handle_packet(world: &mut World, decoded: GamePacket) {
                 // Own bullet: spawn at server-authoritative position
                 world.bullets.push(Bullet::new(spawn_pos, dir, owner_id));
             } else {
-                // Remote player's bullet: spawn as enemy_bullet
+                // Remote player's bullet: spawn as remote_bullet
                 world
-                    .enemy_bullets
+                    .remote_bullets
                     .push(Bullet::new(spawn_pos, dir, owner_id));
-            }
-        }
-        // NEW: Phase 2e - EnemyDied from server (authoritative enemy death)
-        GamePacket::EnemyDied {
-            enemy_id,
-            room_x,
-            room_y,
-        } => {
-            // Only process if we're in the same room
-            if room_x as usize == world.current_coords.0
-                && room_y as usize == world.current_coords.1
-            {
-                if let Some(enemy) = world.enemies.iter_mut().find(|e| e.id == enemy_id) {
-                    enemy.die();
-                } else {
-                    // Enemy not yet spawned (race condition: EnemyDied arrived before EnemyStateResponse)
-                    // Queue the death to be applied when the enemy spawns.
-                    world.pending_enemy_deaths.insert(enemy_id);
-                }
-            }
-            // If room mismatch, ignore silently — room load will sync state
-        }
-        // NEW: Phase 2e - EnemyStateResponse from server (room load sync)
-        GamePacket::EnemyStateResponse {
-            room_x,
-            room_y,
-            enemies,
-        } => {
-            // Only process if we're in the requested room
-            if room_x as usize == world.current_coords.0
-                && room_y as usize == world.current_coords.1
-            {
-                // Re-run enemies_from_data to get kinds, then match by spawn order
-                let level = &world.levels_matrix[room_y as usize][room_x as usize];
-                let template_enemies =
-                    game::entities::enemy::enemies_from_data(&level.data, room_x);
-
-                for (i, (enemy_id, alive, _spawn_x, _spawn_y)) in enemies.into_iter().enumerate() {
-                    if alive && i < template_enemies.len() {
-                        let template = &template_enemies[i];
-                        let mut enemy = game::entities::enemy::Enemy::new(
-                            enemy_id,
-                            template.pos,
-                            template.kind,
-                        );
-                        // Apply any pending deaths that arrived before this enemy was spawned
-                        if world.pending_enemy_deaths.remove(&enemy_id) {
-                            enemy.die();
-                        }
-                        world.enemies.push(enemy);
-                    }
-                }
             }
         }
         GamePacket::Leave { id } => {

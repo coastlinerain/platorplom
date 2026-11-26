@@ -55,9 +55,13 @@ mod handshake_tests {
     #[test]
     fn poll_join_response_discards_packets_before_join_response() {
         let mut io = DummyPacketIO::with_inbox(vec![
-            GamePacket::EnemyStateRequest {
-                room_x: 0,
-                room_y: 0,
+            GamePacket::BulletSpawn {
+                bullet_id: 0,
+                x: 0.0,
+                y: 0.0,
+                dir: 1.0,
+                owner_id: 1,
+                seq: 0,
             },
             GamePacket::JoinResponse { assigned_id: 3 },
         ]);
@@ -101,9 +105,13 @@ mod handshake_tests {
     fn poll_join_response_ignores_non_join_packets() {
         let mut io = DummyPacketIO::with_inbox(vec![
             GamePacket::Leave { id: 1 },
-            GamePacket::EnemyStateRequest {
-                room_x: 2,
-                room_y: 3,
+            GamePacket::BulletSpawn {
+                bullet_id: 0,
+                x: 0.0,
+                y: 0.0,
+                dir: 1.0,
+                owner_id: 1,
+                seq: 0,
             },
         ]);
 

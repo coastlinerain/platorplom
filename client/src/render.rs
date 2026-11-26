@@ -4,12 +4,10 @@
 // macroquad dependency, so the `draw` methods that used to live on each entity
 // are expressed here as impls of a *local* `Drawable` trait. This is allowed by
 // the orphan rule: `Drawable` is defined in this crate, so we may implement it
-// for the foreign `game` types. The `EnemyKind -> Color` mapping lives here too,
-// keeping `Color` (a macroquad type) out of `game`.
+// for the foreign `game` types.
 
 use game::config::TILE_SIZE;
 use game::entities::bullet::Bullet;
-use game::entities::enemy::{Enemy, EnemyKind};
 use game::entities::nemesis::Nemesis;
 use game::entities::player::Player;
 use game::level::Level;
@@ -42,16 +40,6 @@ impl Drawable for Level {
 impl Drawable for Player {
     fn draw(&self) {
         draw_rectangle(self.pos.x, self.pos.y, self.w, self.h, RED);
-    }
-}
-
-impl Drawable for Enemy {
-    fn draw(&self) {
-        let color = match self.kind {
-            EnemyKind::Enemy => BLUE,
-            EnemyKind::Potion => GREEN,
-        };
-        draw_rectangle(self.pos.x, self.pos.y, self.w, self.h, color);
     }
 }
 
