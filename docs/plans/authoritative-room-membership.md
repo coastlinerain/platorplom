@@ -569,7 +569,7 @@ Each box is a small, independently verifiable step. The `implementer` fills the
 
 ### Box 2 — `protocol`: packet surface
 
-- [ ] done
+- [x] done
 - **Files**: `protocol/Cargo.toml`; `protocol/src/lib.rs`;
   `protocol/tests/round_trip.rs`.
 - **Change**:
@@ -589,13 +589,28 @@ Each box is a small, independently verifiable step. The `implementer` fills the
   `RoomChangeResponse`.
 - **Test**: P1–P5.
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts: _(likely: enum variants as wire indices in postcard, reusing
-    a type across crates, a dependency edge with no cycle, `Command`/`cargo tree`
-    assertions)_
-  - Watch out: _(append at the end; `Direction` variant order is wire format;
-    `PlayerPos` must keep its room fields)_
+  - What: `protocol` now depends on `game`; `PlayerInput` lost `level_x`/
+    `level_y`; `RequestRoomChange { id, direction }` and `RoomChangeResponse {
+    accepted, level_x, level_y, x, y }` were appended after `BulletSpawn`;
+    `PlayerPos` was left untouched.
+  - Why: a client may ask to use a *direction* only. There is no packet field
+    through which it can name a room, which closes the spoofed-room path in the
+    type system rather than in server validation alone. The response carries
+    the server's authoritative room/position for both accept and reject so the
+    client has a precise apply or snap-back target.
+  - Rust concepts: enum variants in `postcard` are encoded by index, so
+    appending is the only index-stable change (inserting would shift
+    `BulletSpawn` and silently break peers); a shared type (`Direction`) lives
+    in `game` and is imported into `protocol`, giving one enum, not a
+    protocol-local duplicate; the dependency edge is acyclic because `game`
+    knows nothing about `protocol`; P5 uses `std::process::Command` +
+    `cargo tree --depth 1 --edges normal` to assert the direct edge without
+    failing on the now-transitive `glam`.
+  - Watch out: append at the end; `Direction` variant order
+    (`North, South, East, West`) is wire format; `PlayerPos` must keep
+    `level_x`/`level_y` (nemesis placement); removing fields from a variant
+    changes its payload, which is acceptable only because the whole workspace
+    is rebuilt together (no wire migration).
 
 ### Box 3 — `server` world: validation, teleport, cooldown
 
