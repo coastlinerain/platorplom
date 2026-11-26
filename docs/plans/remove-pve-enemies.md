@@ -1,6 +1,6 @@
 # Remove PvE enemies — Implementation Plan
 
-- Status: draft
+- Status: implemented (2026-11-26; 178 passed, 3 ignored)
 - Spec: `docs/specs/remove-pve-enemies.md`
 - Date: 2026-11-26
 - Branch: `refactor/remove-pve-enemies`
@@ -102,7 +102,7 @@ Deleted public/type items (must not remain anywhere):
 
 ### Box 1 — Remove the PvE enemy machinery + rename `enemy_bullets` → `remote_bullets`
 
-- [ ] done
+- [x] done
 - **Files**: edit `protocol/src/lib.rs`; edit `protocol/tests/round_trip.rs`;
   edit `server/src/world.rs`; edit `server/src/lib.rs`; edit `server/src/main.rs`;
   delete `game/src/entities/enemy.rs`; edit `game/src/entities/mod.rs`;
@@ -426,10 +426,40 @@ Deleted public/type items (must not remain anywhere):
   above.
 
 - **Explain**
-  - What:
-  - Why:
-  - Rust concepts:
-  - Watch out:
+  - What: Removed the PvE enemy machinery end-to-end and renamed the PvP field.
+    `protocol` lost `GamePacket::{EnemyDied, EnemyStateRequest,
+    EnemyStateResponse}` (+3 round-trip tests); `server` lost `EnemyState`,
+    `EnemyDiedInfo`, `ServerWorld.enemies`, `build_enemies_for_room`,
+    `raycast_hit`, `get_enemy_state`, the `EnemyStateRequest` handler and the
+    `EnemyDied` broadcast, and `ServerWorld::update` now returns
+    `Vec<BulletSpawnInfo>` (5 enemy tests deleted, 2 shoot tests kept);
+    `game` unregister the `enemy` module; `client` lost the `enemies` /
+    `pending_enemy_deaths` fields, the client-side RNG simulation and drawing,
+    the two enemy packet handlers and `impl Drawable for Enemy`; `e2e` lost its
+    PvE tests. `enemy_bullets` → `remote_bullets` and
+    `update_enemy_bullets_position` → `update_remote_bullets_position`
+    everywhere. The three files slated for deletion were emptied and their
+    modules unregistered so the build stays green until the orchestrator
+    removes them.
+  - Why: The game is PvP-only; the leftover PvE monster concept duplicated a
+    second authoritative state machine, drove a `raycast_hit` path with no
+    remaining gameplay purpose, and gave other players' bullets a misleading
+    "enemy" name. Removing it shrinks the surface before spec 2 re-introduces
+    authoritative PvP hit detection.
+  - Rust concepts: enum-variant deletion forcing exhaustive matches to shrink
+    (the compiler proves no stale arm remains); function signature change
+    (tuple → `Vec`) surfacing every call site at compile time; ownership and
+    borrowing (dropping `&mut self.enemies` field borrows and the
+    `HashMap<(u8, u8), Vec<EnemyState>>` map); orphan-rule trait impl removal
+    (`impl Drawable for Enemy`); module registration (`pub mod enemy;`) as the
+    boundary that decides whether a file is compiled at all; `Result`/`Option`
+    unaffected — no `unwrap` added.
+  - Watch out: `update` no longer hits anything (accepted: shooting emits a
+    `BulletSpawn` that hits nothing until spec 2); the three emptied files are
+    still on disk and must be `rm`-ed by the orchestrator (this shell cannot
+    delete); `e2e/tests/edge_cases_2e.rs` also needed its now-unused
+    `use protocol::GamePacket;` removed for clippy; test count drops from 194
+    to 178 passed (16 PvE tests intentionally deleted), 3 ignored.
 
 ## Open questions / ambiguities (for the plan reviewer)
 
