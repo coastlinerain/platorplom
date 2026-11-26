@@ -1,7 +1,7 @@
 use crate::camera::GameCamera;
 use crate::network::packet_io::PacketIO;
 use crate::render::Drawable;
-use crate::world::lib::{check_level_transitions, update_remote_bullets_position};
+use crate::world::lib::{request_room_change, update_remote_bullets_position};
 
 use crate::network::interpolation::RemoteInterp;
 use crate::network::prediction::InputRingBuffer;
@@ -12,6 +12,7 @@ use game::entities::nemesis::Nemesis;
 use game::entities::player::Player;
 use game::level::Level;
 use game::maps::Map;
+use game::room_graph::{Direction, RoomCoords, RoomGraph};
 use macroquad::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -67,6 +68,16 @@ pub struct World {
     /// Set true by `handle_packet` when any `PlayerPos` is received; consumed by
     /// the app runner's disconnect watchdog (cleared each frame after the check).
     pub received_player_pos: bool,
+    // --- NEW: spec 3 - authoritative room membership ---
+    /// Shared door graph used for geometric door detection.
+    pub room_graph: RoomGraph,
+    /// At most one outstanding `RequestRoomChange` (wait for its ack).
+    pub pending_room_change: Option<Direction>,
+    /// False immediately after an accepted transition; re-armed only once the
+    /// player leaves every door band (anti-bounce).
+    pub room_change_armed: bool,
+    /// Ticks to wait after a rejection before requesting again.
+    pub room_change_retry: u8,
 }
 
 impl fmt::Debug for World {
@@ -139,7 +150,17 @@ impl World {
             move_left: false,
             move_right: false,
             received_player_pos: false,
+            room_graph: RoomGraph::new(),
+            pending_room_change: None,
+            room_change_armed: true,
+            room_change_retry: 0,
         }
+    }
+
+    /// The current room as a graph coordinate. Keeps the `(usize, usize)` →
+    /// `(u8, u8)` cast in one place.
+    pub fn current_room(&self) -> RoomCoords {
+        (self.current_coords.0 as u8, self.current_coords.1 as u8)
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -180,9 +201,11 @@ impl World {
             self.camera
                 .update(self.player.pos, vec2(self.player.w, self.player.h), level);
         }
-        // Must run AFTER the bullet updates so a room transition
-        // (`load_current_level`) clears this frame's bullets.
-        check_level_transitions(self);
+        // Detection only: the client requests a room change from its predicted
+        // body and never mutates `current_coords` here. The level is loaded
+        // when the server's `RoomChangeResponse` (or own `PlayerPos`) is
+        // applied.
+        request_room_change(self);
         update_network(self);
 
         self.bullets.retain(|b| b.active);

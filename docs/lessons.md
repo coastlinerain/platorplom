@@ -596,3 +596,53 @@ Running journal of Rust concepts encountered while building Rustvania.
 - **Where**: `server/src/world.rs` (`raycast_player`).
 - **What it is**: the ray math is `d_near = (near_edge - spawn_x) * dir` and `hit_x = spawn_x + dir * distance`. The spec says "only the sign of `dir` matters", which is true only while `dir ∈ {−1.0, 1.0}`. Today `Player.dir` is ±1.0, so it holds; but the invariant is implicit, and a `dir` with `|dir| ≠ 1` would silently scale both the hit point and the closest-hit ordering.
 - **Gotcha / insight**: when a function's contract is "only the sign matters", make the code say so — normalize `let dir = dir.signum()` at the top — rather than trusting the caller. This is the flagged (MINOR) hardening from QA; the lesson is to encode the invariant instead of documenting it.
+
+## feat: authoritative room membership (2026-11-26)
+
+### Enum variant order as wire format — `serde` derive across crates (2026-11-26)
+
+- **Where**: `game/src/room_graph.rs` (`Direction`), `protocol/src/lib.rs` (`GamePacket::RequestRoomChange`), `game/Cargo.toml`.
+- **What it is**: postcard does not encode variant *names*; it encodes the **variant index**. `Direction { North, South, East, West }` therefore has a documented ABI: reordering or inserting a variant silently reinterprets bytes produced by an older peer. `game` derives `serde::Serialize`/`Deserialize` on `Direction`, and `protocol` merely *imports* the type — one shared enum, not a protocol-local duplicate. `GamePacket`'s new variants are appended after `BulletSpawn` for the same reason (existing indices stay stable).
+- **Gotcha / insight**: append-only is the safe change; insertion in the middle is a wire break that the compiler cannot catch. Single-workspace rebuilds make the `PlayerInput` payload change acceptable, but a released protocol would need versioning (explicitly out of scope). `cargo tree -p protocol --depth 1` is also load-bearing in the dependency test: `glam` is now transitive through `game`, so a full-tree check would always see it.
+
+### An inherent method on a `Copy` struct returning derived geometry (2026-11-26)
+
+- **Where**: `game/src/room_graph.rs` (`Door::server_trigger`), `RoomGraph::{door, door_at, can_enter}`.
+- **What it is**: `Door` is plain data (`Copy`), and `server_trigger(&self) -> Rect` builds a new `Rect` from `self.trigger` with one edge grown by `DOOR_LEAD_TOLERANCE_PX`; `&self` is enough because `Rect` and `Door` are both `Copy` and the method never mutates. `door()`/`door_at()` use `Iterator::find(...).copied()` to return `Option<Door>` by value, so callers get a snapshot and the borrow of `doors` ends with the scan. `can_enter` composes `door(...).map(|d| d.server_trigger().overlaps(&rect)).unwrap_or(false)` — "door exists AND body overlaps", with no `unwrap`.
+- **Gotcha / insight**: the *asymmetry* is deliberate and must not be "simplified": client detection uses the raw geometric `trigger`; only the server uses the lead-expanded `server_trigger`. Sharing the expander with the client would let `door_at` fire ~8 px early and the reverse door could bounce an honest player at the entry. Also note `Rect::overlaps` is strict (`<`), so entry positions can sit exactly inside the reverse band — that is why disarm + cooldown exist.
+
+### `Option<T>` as a domain outcome, not an error — `let-else` for the invariant (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`apply_room_change -> Option<RoomChangeInfo>`), `client/src/world/lib.rs` (`pending_room_change: Option<Direction>`).
+- **What it is**: `apply_room_change` has three outcomes: unknown player (no response), rejected (a normal protocol event carrying the unchanged state), and accepted. `Option<RoomChangeInfo>` expresses "is there a reply?" while `RoomChangeInfo.accepted` expresses accept/reject. A `Result` would misuse the error channel for a legitimate game event and force the caller to choose an error type with no meaning. The guaranteed door after `can_enter` is extracted with `let Some(door) = ... else { return Some(rejection(...)) };` — no `unwrap`, and the impossible branch still returns a valid reply.
+- **Gotcha / insight**: "rejected" is **not** `None`: a rejection must carry the current room/position so the client can snap back. `None` is reserved for "there is no player state at all". Also remember a rejection must mutate **nothing** — it is tempting to set the cooldown/pos "helpfully", which would turn a validation failure into state corruption.
+
+### `HashMap::values_mut` + `saturating_sub` for a tick cooldown (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`update` top, `room_change_cooldown`).
+- **What it is**: once per tick, `for cooldown in self.room_change_cooldown.values_mut() { *cooldown = cooldown.saturating_sub(1); }` decrements every player's cooldown in place. `values_mut()` yields `&mut u8`, so the `*` dereference writes through the reference. `saturating_sub` clamps at 0 instead of wrapping/panicking, which matters for a `u8` that is mostly zero. The cooldown is set only on acceptance (12 ticks) and is the server-side anti-ping-pong backstop.
+- **Gotcha / insight**: put the decrement at the **top** of `update`, before input/movement, so "wait N ticks" means exactly N updates. If it ran after the movement/shoot passes, a cooldown set during the tick would be decremented in the same tick and every N would be off by one. `saturating_sub` is also the right tool for `u8` countdowns generally — underflow panics in debug and wraps in release, both wrong here.
+
+### Splitting `&self` reads from a `&mut self` teleport — copy scalars first (2026-11-26)
+
+- **Where**: `server/src/world.rs` (`apply_room_change`, `force_teleport`, private `level(room)`).
+- **What it is**: `apply_room_change` needs to read the player's rect/size, then read the graph/level (`&self`), then mutate the player and `coords` (`&mut self`). The borrow checker rejects holding a `&Level` across a `get_mut`, so the method first copies `(player_rect, w, h)` out of `&self.players`, computes `grounded` into an owned `bool` via `&self.level(...)`, and only then takes `self.players.get_mut(&id)`. `force_teleport` follows the same shape: read `(w, h)`, compute `grounded`, then mutate. Player position/velocity are assigned **field-wise** (`player.pos.x = …`, `player.vel.y = 0.0`) so the server crate needs no normal `glam` dependency; `glam` stays a dev-dependency.
+- **Gotcha / insight**: "collect/copy the read-only inputs, compute the derived value, then mutate" is the general fix for read-then-write on the same `self`. Copying `w`/`h` (instead of borrowing `&Player`) is what makes it work for a single field. And `grounded` **must** be recomputed from the *target* level at the entry: inheriting a stale `true` from the old room lets a jump edge fire on the first tick after a vertical entry (S7/S10 pin this).
+
+### Idempotent state application + an ordering gate across two streams (2026-11-26)
+
+- **Where**: `client/src/network/world.rs` (`RoomChangeResponse` handler, own-`PlayerPos` adoption).
+- **What it is**: the reliable `RoomChangeResponse` and the unreliable `PlayerPos` can arrive in either order. Both paths call the same `apply_room_change_local(world, room, pos)`, which sets the room/top-left, zeroes velocity, snaps `prev_player_*`, clears the input buffer, clears pending/retry, disarms, and reloads the level. Applying the same ack twice is harmless — it is a *state transformation*, not a toggle. Adoption from `PlayerPos` is gated by `!game::is_newer_seq(last_seq, world.last_acked_seq)`, so a stale pre-transition packet is ignored instead of dragging the client back.
+- **Gotcha / insight**: the ordering gate belongs on the *unreliable* stream (`PlayerPos`), not the reliable ack: a stale `PlayerPos` is the only one that can arrive after the ack with old data. Also watch the ordering dependency in the reject path — `apply_room_change_local` resets `room_change_retry` to 0, so the handler must call it **first** and assign `ROOM_CHANGE_RETRY_TICKS` afterwards. And clear the input buffer on *both* accept and reject; otherwise replay can immediately undo a snap-back.
+
+### `iter().enumerate()` for per-client routing in a harness (2026-11-26)
+
+- **Where**: `e2e/src/harness.rs` (Step 3 `RequestRoomChange` handling, `room_change_responses`).
+- **What it is**: the harness has parallel `from_clients`/`to_clients` vectors plus `clients` metadata. `for (i, rx) in self.from_clients.iter().enumerate()` pairs each receiver with its sender so a response can be written to `self.to_clients[i]` only — the harness equivalent of the real server's `addrs.get(&addr)`. Per-client counters live in `HashMap<ClientHandle, usize>` behind `.entry(handle).or_insert(0) += 1`. Using `enumerate()` rather than `for i in 0..len` also avoids clippy's `needless_range_loop` under `-D warnings`.
+- **Gotcha / insight**: a broadcast here would make every client adopt another player's room and would hide the cheat the E3 test proves. The loop borrows `&self.from_clients` while mutating `self.server` and `self.to_clients[i]` — that compiles because Rust borrows **disjoint fields**, not whole-`self`; calling a `&mut self` helper inside the loop would fail. Also note the harness deliberately ignores the packet's `id` (resolving from the client index) so a malicious request cannot name another player, mirroring the transport-map lookup on the real server.
+
+### Grounded-gated re-arm + cooldown on rejection (2026-11-26)
+
+- **Where**: `client/src/world/lib.rs` (`request_room_change`), `server/src/world.rs` (`apply_room_change`).
+- **What it is**: two small guards that close real QA findings. (1) `request_room_change` re-arms (`room_change_armed = true`) only when `door_at` returns `None` **and** `world.player.grounded`; without the `grounded` half, a jump out of the entry band re-arms mid-air and the descent back into the band fires a reverse request — bouncing the player to the previous room. (2) `apply_room_change` arms the per-player cooldown on **rejection** too, and returns `None` (no response) while it is active, so at most one `RoomChangeResponse` per player per window — otherwise a modified client could spam rejected requests and the server would amplify each into a reliable packet.
+- **Gotcha / insight**: a `bool` guard (`grounded`) layered on a state flag (`armed`) is cheap but must be read from the *predicted* body the client is actually gating on — not the server's. And "cooldown arms on both accept and reject" changes the reject→retry timing: the client's `ROOM_CHANGE_RETRY_TICKS` must be ≥ the server cooldown or a legitimate retry lands inside the window and is silently dropped (the client has no timeout — owner decision 4).

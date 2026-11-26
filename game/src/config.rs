@@ -35,6 +35,20 @@ pub const CONNECT_TIMEOUT_MS: u64 = 5000;
 /// Disconnect watchdog: fire `ConnectionLost` if no `PlayerPos` for this long.
 pub const DISCONNECT_TIMEOUT_MS: u64 = 1000;
 
+/// Server: minimum ticks between room-change responses for one player (an
+/// accepted change or a rejection arms it). ~100 ms at 60 Hz. Tunable if door
+/// ping-pong becomes a real problem.
+pub const ROOM_CHANGE_COOLDOWN_TICKS: u8 = 6;
+
+/// Client: ticks to wait after a rejected request before retrying.
+pub const ROOM_CHANGE_RETRY_TICKS: u8 = 6;
+
+/// Server-side only: extra px added to a door's geometric trigger on the
+/// approach edge before `can_enter` validates. Covers one prediction tick
+/// (~VELOCIDAD / TICK_HZ ≈ 6.667 px) with margin. The client's `door_at`
+/// detection does not use this.
+pub const DOOR_LEAD_TOLERANCE_PX: f32 = 8.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +59,13 @@ mod tests {
     fn fixed_timestep_constants() {
         assert_eq!(MAX_ACCUMULATED_FRAMES, 5);
         assert_eq!(HEADLESS_BUSY_WAIT_MS, 1);
+    }
+
+    /// Spec 3 fix (m2): the room-change cooldown is deliberately short (~100 ms
+    /// at 60 Hz) so an honest client can reverse quickly while a modified one
+    /// still gets at most one `RoomChangeResponse` per window.
+    #[test]
+    fn room_change_cooldown_is_six_ticks() {
+        assert_eq!(ROOM_CHANGE_COOLDOWN_TICKS, 6);
     }
 }

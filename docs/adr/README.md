@@ -30,3 +30,4 @@ Index of decisions. Name files `NNNN-short-title.md`, zero-padded to 4 digits.
 | 1 | [Networking model](0001-networking-model.md) | Accepted |
 | 2 | [Game state machine](0002-game-state-machine.md) | Accepted |
 | 3 | [Authoritative player death](0003-authoritative-player-death.md) | Accepted |
+| 4 | [Authoritative room membership](0004-authoritative-room-membership.md) | Accepted |

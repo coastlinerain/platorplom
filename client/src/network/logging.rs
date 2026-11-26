@@ -35,6 +35,8 @@ fn packet_type_name(p: &GamePacket) -> &'static str {
         GamePacket::Leave { .. } => "Leave",
         GamePacket::PlayerDied { .. } => "PlayerDied",
         GamePacket::BulletSpawn { .. } => "BulletSpawn",
+        GamePacket::RequestRoomChange { .. } => "RequestRoomChange",
+        GamePacket::RoomChangeResponse { .. } => "RoomChangeResponse",
     }
 }
 
@@ -47,6 +49,7 @@ fn packet_id(p: &GamePacket) -> Option<u8> {
         GamePacket::Leave { id } => Some(*id),
         GamePacket::PlayerDied { id } => Some(*id),
         GamePacket::BulletSpawn { owner_id, .. } => Some(*owner_id),
+        GamePacket::RequestRoomChange { id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -86,8 +89,6 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
         }
         GamePacket::PlayerInput {
             id,
-            level_x,
-            level_y,
             move_left,
             move_right,
             jump,
@@ -95,7 +96,6 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             seq,
         } => serde_json::json!({
             "id": id,
-            "level": [level_x, level_y],
             "move_left": move_left,
             "move_right": move_right,
             "jump": jump,
@@ -137,12 +137,27 @@ pub fn packet_key_fields(p: &GamePacket) -> Value {
             "owner_id": owner_id,
             "seq": seq,
         }),
+        GamePacket::RequestRoomChange { id, direction } => {
+            serde_json::json!({ "id": id, "direction": direction })
+        }
+        GamePacket::RoomChangeResponse {
+            accepted,
+            level_x,
+            level_y,
+            x,
+            y,
+        } => serde_json::json!({
+            "accepted": accepted,
+            "level": [level_x, level_y],
+            "pos": [x, y],
+        }),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game::room_graph::Direction;
     use protocol::GamePacket;
 
     #[test]
@@ -155,8 +170,6 @@ mod tests {
         assert_eq!(
             packet_type_name(&GamePacket::PlayerInput {
                 id: 1,
-                level_x: 0,
-                level_y: 0,
                 move_left: false,
                 move_right: false,
                 jump: false,
@@ -195,6 +208,23 @@ mod tests {
             }),
             "BulletSpawn"
         );
+        assert_eq!(
+            packet_type_name(&GamePacket::RequestRoomChange {
+                id: 1,
+                direction: Direction::East
+            }),
+            "RequestRoomChange"
+        );
+        assert_eq!(
+            packet_type_name(&GamePacket::RoomChangeResponse {
+                accepted: false,
+                level_x: 0,
+                level_y: 0,
+                x: 0.0,
+                y: 0.0
+            }),
+            "RoomChangeResponse"
+        );
     }
 
     #[test]
@@ -207,8 +237,6 @@ mod tests {
         assert_eq!(
             packet_id(&GamePacket::PlayerInput {
                 id: 3,
-                level_x: 0,
-                level_y: 0,
                 move_left: false,
                 move_right: false,
                 jump: false,
@@ -244,6 +272,23 @@ mod tests {
             }),
             Some(4)
         );
+        assert_eq!(
+            packet_id(&GamePacket::RequestRoomChange {
+                id: 6,
+                direction: Direction::South
+            }),
+            Some(6)
+        );
+        assert_eq!(
+            packet_id(&GamePacket::RoomChangeResponse {
+                accepted: false,
+                level_x: 0,
+                level_y: 0,
+                x: 0.0,
+                y: 0.0
+            }),
+            None
+        );
     }
 
     #[test]
@@ -256,8 +301,6 @@ mod tests {
         assert_eq!(
             packet_seq(&GamePacket::PlayerInput {
                 id: 0,
-                level_x: 0,
-                level_y: 0,
                 move_left: false,
                 move_right: false,
                 jump: false,
@@ -292,6 +335,23 @@ mod tests {
             Some(123)
         );
         assert_eq!(packet_seq(&GamePacket::Leave { id: 0 }), None);
+        assert_eq!(
+            packet_seq(&GamePacket::RequestRoomChange {
+                id: 0,
+                direction: Direction::North
+            }),
+            None
+        );
+        assert_eq!(
+            packet_seq(&GamePacket::RoomChangeResponse {
+                accepted: true,
+                level_x: 1,
+                level_y: 0,
+                x: 10.0,
+                y: 321.0
+            }),
+            None
+        );
     }
 
     #[test]
@@ -350,8 +410,6 @@ mod tests {
         let _ = packet_key_fields(&GamePacket::JoinResponse { assigned_id: 1 });
         let _ = packet_key_fields(&GamePacket::PlayerInput {
             id: 1,
-            level_x: 0,
-            level_y: 0,
             move_left: true,
             move_right: false,
             jump: true,
@@ -378,6 +436,17 @@ mod tests {
             dir: 1.0,
             owner_id: 1,
             seq: 5,
+        });
+        let _ = packet_key_fields(&GamePacket::RequestRoomChange {
+            id: 1,
+            direction: Direction::East,
+        });
+        let _ = packet_key_fields(&GamePacket::RoomChangeResponse {
+            accepted: true,
+            level_x: 1,
+            level_y: 0,
+            x: 10.0,
+            y: 321.0,
         });
     }
 

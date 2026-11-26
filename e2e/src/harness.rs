@@ -4,7 +4,7 @@ use game::maps::Map;
 use metroidvania_rust::network::prediction;
 use metroidvania_rust::network::world::handle_packet;
 use metroidvania_rust::world::game::World;
-use metroidvania_rust::world::lib::check_level_transitions;
+use metroidvania_rust::world::lib::request_room_change;
 use metroidvania_server::{PlayerHitInfo, ServerWorld};
 use protocol::GamePacket;
 use std::sync::mpsc;
@@ -82,6 +82,14 @@ pub struct TestHarness {
     /// server.world.update's return value).  Used by server_bullet_count
     /// because the server never stores Bullet objects (D6).
     pub total_shots: std::collections::HashMap<u8, usize>,
+    /// Cumulative client→server `RequestRoomChange` packets observed in Step 3.
+    pub client_room_change_requests: usize,
+    /// Cumulative `accepted: false` `RoomChangeResponse`s sent. Must stay 0 for
+    /// the deterministic walk-in test.
+    pub client_room_change_rejects: usize,
+    /// Cumulative `RoomChangeResponse` packets delivered per client (proves
+    /// per-requester routing, not a broadcast).
+    room_change_response_counts: std::collections::HashMap<ClientHandle, usize>,
 }
 
 impl TestHarness {
@@ -100,6 +108,9 @@ impl TestHarness {
             last_broadcasts: Vec::new(),
             last_actions: Vec::new(),
             total_shots: std::collections::HashMap::new(),
+            client_room_change_requests: 0,
+            client_room_change_rejects: 0,
+            room_change_response_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -150,8 +161,17 @@ impl TestHarness {
         self.clients.push(client);
         self.from_clients.push(rx_server_side);
         self.to_clients.push(tx_to_client);
+        self.room_change_response_counts.insert(handle, 0);
 
         handle
+    }
+
+    /// Cumulative `RoomChangeResponse` packets delivered to this client.
+    pub fn room_change_responses(&self, handle: ClientHandle) -> usize {
+        self.room_change_response_counts
+            .get(&handle)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn tick(&mut self) {
@@ -189,8 +209,6 @@ impl TestHarness {
 
             let input = GamePacket::PlayerInput {
                 id: client.player_id,
-                level_x: client.world.current_coords.0 as u8,
-                level_y: client.world.current_coords.1 as u8,
                 move_left: client.world.move_left,
                 move_right: client.world.move_right,
                 jump,
@@ -208,14 +226,14 @@ impl TestHarness {
             client.world.network.send(input);
         }
 
-        // Step 3: Drain client→server channels, feed server.apply_input.
-        for rx in &self.from_clients {
+        // Step 3: Drain client→server channels, feed server.apply_input and
+        // handle room-change requests per requester (`i` indexes the paired
+        // `to_clients`, so a response goes back to that client only).
+        for (i, rx) in self.from_clients.iter().enumerate() {
             while let Ok(bytes) = rx.try_recv() {
                 match postcard::from_bytes::<GamePacket>(&bytes) {
                     Ok(GamePacket::PlayerInput {
                         id,
-                        level_x,
-                        level_y,
                         move_left,
                         move_right,
                         jump,
@@ -224,8 +242,6 @@ impl TestHarness {
                     }) => {
                         self.server.apply_input(
                             id,
-                            level_x,
-                            level_y,
                             PlayerInput {
                                 move_left,
                                 move_right,
@@ -234,6 +250,31 @@ impl TestHarness {
                             },
                             seq,
                         );
+                    }
+                    Ok(GamePacket::RequestRoomChange { direction, .. }) => {
+                        // Resolve the requester from the client index, like the
+                        // real server resolves from `addrs.get(&addr)`; the
+                        // packet id is not trusted.
+                        let player_id = self.clients[i].player_id;
+                        self.client_room_change_requests += 1;
+
+                        if let Some(info) = self.server.apply_room_change(player_id, direction) {
+                            let response = GamePacket::RoomChangeResponse {
+                                accepted: info.accepted,
+                                level_x: info.room.0,
+                                level_y: info.room.1,
+                                x: info.pos.0,
+                                y: info.pos.1,
+                            };
+                            let handle = self.clients[i].handle;
+                            *self.room_change_response_counts.entry(handle).or_insert(0) += 1;
+                            if !info.accepted {
+                                self.client_room_change_rejects += 1;
+                            }
+                            if let Ok(bytes) = postcard::to_allocvec(&response) {
+                                let _ = self.to_clients[i].send(bytes);
+                            }
+                        }
                     }
                     Ok(GamePacket::PlayerDied { .. }) => {
                         // Must stay 0: death is server-authoritative.
@@ -358,8 +399,8 @@ impl TestHarness {
                 // else: bogus coords — skip prediction.
             }
 
-            // --- 7c: room transitions ---
-            check_level_transitions(&mut client.world);
+            // --- 7c: room-change detection (predicted body → one request) ---
+            request_room_change(&mut client.world);
 
             // --- 7d: cleanup ---
             client.world.bullets.retain(|b| b.active);
@@ -416,13 +457,13 @@ impl TestHarness {
         }
     }
 
-    /// Force the server-side room coords (client-claimed coords are overwritten
-    /// every tick by `PlayerInput`, so this makes the fixture explicit and is
-    /// the seam spec 3 will replace with room authority).
+    /// Room-only server teleport (`force_teleport`) that preserves the player's
+    /// current position; replaces the old client-claimed-coords `apply_input`
+    /// abuse. Door validation is intentionally bypassed for test setup.
     pub fn set_server_player_coords(&mut self, handle: ClientHandle, x: u8, y: u8) {
         let player_id = self.player_id_for(handle);
-        self.server
-            .apply_input(player_id, x, y, PlayerInput::default(), 0);
+        let (px, py) = self.server_player_pos(handle);
+        self.server.force_teleport(player_id, (x, y), (px, py));
     }
 
     pub fn set_server_player_grounded(&mut self, handle: ClientHandle, grounded: bool) {
@@ -546,6 +587,7 @@ impl TestHarness {
         self.clients.remove(idx);
         self.from_clients.remove(idx);
         self.to_clients.remove(idx);
+        self.room_change_response_counts.remove(&handle);
     }
 
     pub fn advance_clock(&mut self, ms: u64) {
