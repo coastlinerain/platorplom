@@ -36,11 +36,11 @@ the respawn's `coords = (0,0)` is overwritten by the next inbound `PlayerInput`.
 Spec 3 must make room membership authoritative for **both** shooter and victim,
 so an attacker cannot become unkillable by spoofing their room.
 
-## 4. `fix/reconciliation-replay-dt` — *current* (next)
+## 4. `fix/reconciliation-replay-dt` — done (merged to `dev`)
 
 Replay dt = `TICK_HZ` (not `CLIENT_HZ`); `CLIENT_HZ` → `RENDER_HZ` as a separate commit.
 
-## 5. `refactor/single-interpolation-path` — *current* (next)
+## 5. `refactor/single-interpolation-path` — done (implemented, 241 tests)
 
 Delete the legacy wall-clock `interpolate`/`interpolate_at`; keep only `interpolate_at_tick`.
 

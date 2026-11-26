@@ -2,7 +2,7 @@
 
 Working memory for the project. **Update this at the end of every task.**
 
-> Last updated: 2026-11-26 (authoritative-room-membership COMPLETE — door graph + RequestRoomChange/RoomChangeResponse; 247 tests green after QA fix batch; ADR-0004; spec 3 of netcode-hardening roadmap)
+> Last updated: 2026-11-26 (single-interpolation-path COMPLETE — legacy wall-clock `interpolate`/`interpolate_at` + 6 tests deleted; 241 tests green; spec 5 of netcode-hardening roadmap)
 
 ## Current status
 
@@ -138,15 +138,37 @@ Working memory for the project. **Update this at the end of every task.**
 - [x] 247 passed / 0 failed / 3 ignored; fmt + clippy clean; grep clean
 - [x] ADR-0004 accepted (11 decisions; M2 latency limitation recorded)
 
+## Single interpolation path checklist — refactor (`refactor/single-interpolation-path`, spec 5)
+- [x] Spec + plan written (`docs/plans/single-interpolation-path.md`); single-box
+      pipeline (no RED window — the API and its calling tests must change together)
+- [x] Box 1 — deleted `RemoteInterp::interpolate` + `RemoteInterp::interpolate_at`
+      (doc comments included); deleted D1–D6 + the `Group D` divider
+- [x] Kept K1–K4 (`interpolate_at_tick_*`), `make_nemesis`, the `use` lines,
+      `push`, `set_anchor`, `new`, `Default`, and the struct fields untouched
+- [x] Renamed `interpolate_evicts_old_snapshots` → `push_evicts_old_snapshots`
+      (owner reversal of the draft's delete-it decision; keeps ring-eviction coverage)
+- [x] Fixed the stale `render.rs:70` doc comment → `interpolate_at_tick` (doc only)
+- [x] 241 passed / 0 failed / 3 ignored (247 − 6); fmt + clippy clean; grep clean
+- [ ] Owner validates; agent does not merge
+
 ## Next actions (top = do first)
 
-1. **Merge spec 3 → dev** — `feat/authoritative-room-membership` is complete and
-   green (247 passed / 3 ignored; fmt + clippy clean; grep clean). The owner
+1. **Merge spec 5 → dev** — `refactor/single-interpolation-path` is complete and
+   green (241 passed / 3 ignored; fmt + clippy clean; grep clean). The owner
    validates, then opens/merges the PR. Do not merge from the agent.
-2. **Spec 4 — `fix/reconciliation-replay-dt`** (next roadmap item) — replay dt
-   should be `TICK_HZ`, not `CLIENT_HZ`; fold in `CLIENT_HZ` → `RENDER_HZ` as a
-   separate commit. Then roadmap spec 5 (`refactor/single-interpolation-path`).
-3. **Spec 3 QA follow-ups (deferred, record for owner)**:
+2. **Netcode roadmap: specs 1–5 done.** Remaining work is the deferred group in
+   `docs/specs/netcode-hardening-roadmap.md`: `feat/lag-compensation` (Part IV),
+   `feat/world-snapshot-batching`, `fix/transport-lifecycle`. Each needs its own
+   spec + plan before any code.
+3. **Spec 5 follow-ups (deferred, record for owner)**:
+   - `RemoteInterp::push` still writes `last_known_server_tick =
+     nemesis.interp_len as u64` (placeholder, overwritten by `set_anchor`);
+     cleanup, not this spec.
+   - The tick path still mixes two time domains (`u64` server ticks + `Instant`
+     anchors); a future refactor could make the anchor conversion explicit.
+   - Docs-merge note: spec 4's progress/lessons entries were lost in the
+     spec-3/spec-4 merge on `dev`; reconstruct if the history matters.
+4. **Spec 3 QA follow-ups (deferred, record for owner)**:
    - **M2 (latency):** 8 px lead tolerance ≈ 40 ms RTT; internet play stalls at
      doorways. Future fix: server request grace window + harness one-way-delay
      knob (recorded in spec/ADR). Loopback/LAN-only until then.
@@ -154,7 +176,7 @@ Working memory for the project. **Update this at the end of every task.**
      cooldown feel is right after playtesting.
    - QA minors m6/m7 (non-building RED commit; Explain written 3×) — process
      notes for future specs, not code.
-4. **Spec 2 QA follow-ups (deferred, record for owner)**:
+5. **Spec 2 QA follow-ups (deferred, record for owner)**:
    - Spawn-kill loop: global `(0,0)` spawn + no i-frames + 83ms cooldown lets an
      attacker kill a respawning player repeatedly. Cheapest fix: `invuln_until_tick`
      map in `raycast_player`; real fix is room-local/checkpoint spawns.
@@ -165,7 +187,7 @@ Working memory for the project. **Update this at the end of every task.**
      `Nemesis` presence, or accept + comment.
    - (resolved by spec 3) Respawn-tick phantom-hit window: the victim's in-flight
      `PlayerInput` no longer carries a room, so it cannot re-claim the old room.
-4. **Phase 2h follow-ups (deferred)**:
+6. **Phase 2h follow-ups (deferred)**:
    - M2 — laminar poller thread + UDP socket leak on Leave/Retry/quit (needs a
      transport `Drop` that drains-then-stops + joins, plus a real-socket check).
    - `.expect()` restructure in `App::enter_playing_from_join` (pass `assigned_id`
@@ -175,16 +197,16 @@ Working memory for the project. **Update this at the end of every task.**
      clock-reset if wanted.
    - Paused-screen remote-animation wording (remote snapshots keep updating while
      paused; "rendering stays frozen" is slightly imprecise).
-5. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
+7. **Phase 2g follow-ups (deferred)** — (b) feed the camera the interpolated
    render position (QA m5); (c) snap `prev_player_*` after reconciliation (QA n3).
-6. **Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.
-7. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
+8. ~~**Phase 2g naming/cleanup** — rename `CLIENT_HZ` → `RENDER_HZ`.~~ (done in spec 4)
+9. **Separate task: English/Spanish cleanup** — `GRAVEDAD`/`SALTO_FUERZA`/
    `VELOCIDAD` and remaining Spanish comments → English.
-8. **Follow-up: netcode smoothness review** — owner wants a seamless online
+10. **Follow-up: netcode smoothness review** — owner wants a seamless online
    experience; analyze interpolation/prediction smoothness (jitter buffer N,
    `INTERPOLATION_DELAY_TICKS`, remote dir/rotation interpolation) as a future
    phase.
-9. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
+11. **Windowless-headless QA follow-ups (deferred, non-blocking)**:
    - Collapse `RealPacketIO`/`HeadlessPacketIO` (now byte-identical in
      `transport.rs`; decide whether the transport-level `headless` bool survives).
    - Convert `.unwrap()` in lib code (`transport.rs` bind/`to_allocvec`,
