@@ -118,7 +118,7 @@ pub fn advance_sticky(sticky: u8, pressed: bool) -> (bool, u8) {
 ///    updates `last_acked_seq`, drains acknowledged inputs from the buffer,
 ///    rewinds the player to `(server_x, server_y, server_dir)`, then replays
 ///    all remaining unacknowledged inputs (movement only — `shoot: false`)
-///    at `1.0 / game::config::CLIENT_HZ` dt using the provided `level`.
+///    at `1.0 / game::config::TICK_HZ` dt using the provided `level`.
 ///
 /// 2. Returns the new `last_acked_seq` value (whether updated or not).
 ///
@@ -151,7 +151,7 @@ pub fn reconcile(
     player.dir = server_dir;
 
     // 5. Replay unacknowledged inputs (movement only — shoot: false).
-    let replay_dt = 1.0 / game::config::CLIENT_HZ as f32;
+    let replay_dt = 1.0 / game::config::TICK_HZ as f32;
     for entry in buffer.replay_order() {
         let replay_input = game::entities::player::PlayerInput {
             move_left: entry.move_left,
