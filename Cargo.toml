@@ -1,0 +1,7 @@
+[workspace]
+members = ["server", "client", "protocol", "game", "e2e"]
+resolver = "3"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

@@ -1,0 +1,16 @@
+# Conventional Commits message template (see CONTRIBUTING.md)
+# <type>(<scope>): <subject>
+#   type:    feat | fix | refactor | test | docs | chore
+#   scope:   protocol | server | client | workspace | docs | ci | agents
+#   subject: imperative, lowercase, no trailing period
+# Lines starting with # are comments and are ignored by git.
+
+feat(scope): subject
+
+# body: what and why this change exists
+#
+# ## Explain
+# ## What
+# ## Why
+# ## Rust concepts
+# ## Watch out
