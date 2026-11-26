@@ -7,9 +7,12 @@ pub const MAP_WIDTH: usize = 20;
 pub const MAP_HEIGHT: usize = 12;
 pub const TICK_HZ: u32 = 60;
 
-/// Approximate client frame rate, used for replay dt during reconciliation and
-/// interpolation interval clamping. Must match the typical display refresh rate.
-pub const CLIENT_HZ: u32 = 60;
+/// Approximate client render frame rate. Distinct from `TICK_HZ` (the fixed
+/// simulation rate): reconciliation replay and interpolation use `TICK_HZ`, not
+/// this. Named `RENDER_HZ` to reflect the display-refresh semantics. Currently
+/// unused (documented for future render-rate-aware code); must track the
+/// typical display refresh rate if it is ever consumed.
+pub const RENDER_HZ: u32 = 60;
 
 /// Number of server ticks to delay rendering behind the estimated server tick.
 /// This provides headroom for the jitter buffer to absorb network variance.
