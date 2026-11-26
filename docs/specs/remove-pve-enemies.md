@@ -127,10 +127,10 @@ the `mod tests`):
 
 #### `server/src/lib.rs`
 
-Change the re-export from
+Change the re-export on line 3 from
 `pub use world::{BulletSpawnInfo, EnemyDiedInfo, EnemyState};` to
-`pub use world::{BulletSpawnInfo, ServerWorld};` (i.e. drop `EnemyDiedInfo` /
-`EnemyState`). Keep `ServerWorld` re-exported.
+`pub use world::BulletSpawnInfo;` (drop `EnemyDiedInfo` / `EnemyState`).
+`ServerWorld` stays re-exported on its own line 2 — do not re-add it.
 
 #### `server/src/main.rs`
 
@@ -182,15 +182,15 @@ Remove the line `pub mod enemy;`. Keep `bullet`, `nemesis`, `player`.
   and the `world.enemy_bullets` references inside it.
 - In `check_player_death`: rename the `world.enemy_bullets` loop variable target
   (PvP collision stays).
-- In `load_current_level`: remove `world.enemies.clear();` and the
-  `EnemyStateRequest` send block (the `req` construction + `world.network.send(req)`
-  + the "Level load requested" println). Keep the rest of `load_current_level`
-  (bullet clears, clock reset, sticky reset).
+- In `load_current_level`: remove `world.enemies.clear();` (line 61),
+  `world.pending_enemy_deaths.clear();` (line 66), and the `EnemyStateRequest`
+  send block (the `req` construction + `world.network.send(req)` + the "Level
+  load requested" println). Keep the rest of `load_current_level` (bullet clears,
+  clock reset, sticky reset). Also rename `world.enemy_bullets.clear()` →
+  `world.remote_bullets.clear()` (line 63).
 - In `handle_death` (respawn path): remove `world.pending_enemy_deaths.clear();`
-  (keep the other clears). Rename `world.enemy_bullets.clear()` →
-  `world.remote_bullets.clear()`.
-- In `load_current_level`: rename `world.enemy_bullets.clear()` →
-  `world.remote_bullets.clear()`.
+  (line 49, keep the other clears). Note: `handle_death` has no
+  `enemy_bullets.clear()` of its own — it delegates to `load_current_level`.
 
 #### `client/src/network/world.rs`
 
